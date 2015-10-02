@@ -136,19 +136,21 @@ class derotator( object ):
         return newx, newy
 
 class WFS ( object ):
-    def __init__(self, beamSize = 1776.0):
+    def __init__(self, wavelength = 1800.0, beamSize = 1776.0, angle = 0.0):
         self.beamSize = beamSize
+        self.wavelength = wavelength
         self.centObscScale = 1.116/8.00
         self.datadir = os.path.dirname(os.path.dirname(__file__))+'/data/'
         self.detector = detector(self, beamSize = beamSize)
-        self.lenslet = lensletArray(self)
+        self.lenslet = lensletArray(self, angle = angle)
         self.wavefront = waveFront(self)
         self.pupil = pupil(0.0, 0.0, innerRadius=self.beamSize/2.0*self.centObscScale,
                 outerRadius=self.beamSize/2.0)
         self.DM = deformableMirror(self)
         self.derotator = derotator(self)
+        self.centroids = []
 
-    def setupInstrument(self, zern, pupil, actuatorPokes, angle):
+    def setupInstrument(self, zern, pupil, actuatorPokes, derotAngle, lensletAngle):
         """
         Generates an image seen by the detector of a wavefront described by
         the zernike coefficients in zern
@@ -157,11 +159,14 @@ class WFS ( object ):
         pupil = [x, y]
         actuatorPokes = list of 60 actuator positions
         """
-        self.derotator.setAngle(numpy.deg2rad(angle))
+        self.derotator.setAngle(numpy.deg2rad(derotAngle))
+        self.lenslet.setClockingAngle(lensletAngle)
         self.pupil.setDecenter(pupil[0], pupil[1])
         self.wavefront.setZern(zern)
         self.DM.setMirror(actuatorPokes)
-        self.detector.expose()
+
+    def expose(self):
+        self.centroids.append(self.detector.expose())
 
     def calcWaveFront(self, x, y):
         wave = self.wavefront.calcWaveFront(x, y)
@@ -224,6 +229,7 @@ class detector( object ):
     
     def expose(self):
         debug = False
+        centroids = []
         subsamp = 30.0
         FWHM_i = 1.1 * subsamp # FWHM in Pixel space
         FWHM_k = 0.88*self.pixPerSubAp*subsamp/FWHM_i
@@ -276,14 +282,21 @@ class detector( object ):
             yc = coord[1]+gridy
             inviewx = (self.xpix > numpy.min(xc)) & (self.xpix <= numpy.max(xc))
             inviewy = (self.ypix > numpy.min(yc)) & (self.ypix <= numpy.max(yc))
+            weightX = 0.0
+            weightY = 0.0
+            denom = 0.0
             for i in range(self.nx):
                 if inviewx[i]:
                     for j in range(self.ny):
                         if inviewy[j]:
                             fp = scipy.where( (xc >= self.xpix[i]) & (xc < self.xpix[i]+self.spacing+0.5) & (yc >= self.ypix[j]) & (yc < self.ypix[j]+self.spacing+0.5))
                             z[j][i] = numpy.sum(image[fp])
+                            weightX += z[j][i]*i
+                            weightY += z[j][i]*j
+                            denom += z[j][i]
                             #print i, j, z[i][j], coord
                     #raw_input()
+            centroids.append([weightX/denom, weightY/denom])
 
         if debug:
             ax1.matshow(extract[0])
@@ -297,7 +310,10 @@ class detector( object ):
             print numpy.max(extract[2]-extract[0])
             raw_input()
         self.z.append(z)
+        self.centroids.append(numpy.array(centroids))
         self.scrambleFrame()
+
+        return self.centroids[-1]
 
 
     def calculateCentroids(self, zern, actuatorPokes):
@@ -408,20 +424,20 @@ class lensletArray( object ):
         self.spacing = spacing   # Lenslet Array Spacing in microns
         self.fl = fl
         self.angle = numpy.deg2rad(angle)
+        self.calculateCentroids()
 
+    def setClockingAngle(self, angle):
+        self.angle = numpy.deg2rad(angle)
+        self.calculateCentroids()
+
+    def calculateCentroids(self):
         coords = []
 
-        """
-        for i in range(9):
-            for j in range(9):
-                if self.apertureMap[i][j]:
-                    coords.append(((i-4)*spacing, (j-4)*spacing))
-        """
         for i in range(9):
             for j in range(9):
                 if self.SLapertureMap[i][j]:
-                    y = (i-4)*spacing
-                    x = (j-4)*spacing
+                    y = (i-4)*self.spacing
+                    x = (j-4)*self.spacing
                     coords.append((x*numpy.cos(self.angle)-y*numpy.sin(self.angle),
                         x*numpy.sin(self.angle)+y*numpy.cos(self.angle)))
 
@@ -447,7 +463,7 @@ class waveFront( object ):
         """
         for mag, z in zip(zern,
                 [self.tip, self.tilt, self.defocus, self.astig1, self.astig2]):
-            z.setMag(mag)
+            z.setMag(mag*2.0*numpy.pi/self.parent.wavelength)
 
     def calcWaveFront(self, x, y):
         """
