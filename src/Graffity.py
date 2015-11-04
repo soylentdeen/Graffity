@@ -6,6 +6,303 @@ from scipy.misc import factorial as fac
 import scipy.interpolate as interp
 import scipy.fftpack as fftpack
 import matplotlib.pyplot as pyplot
+from scipy import optimize
+from scipy.ndimage import rotate
+from PIL import Image
+
+
+class FLIRCamImage( object ):
+    def __init__(self, df):
+        self.df = df
+        self.image = Image.open(self.df)
+        self.imdata = numpy.array(self.image)[:,:,:3].sum(axis=2)
+        self.mean = numpy.mean(self.imdata[self.imdata > 0])
+        self.max = numpy.max(self.imdata)
+        self.imdata = self.imdata/float(self.max)
+        #self.imdata /= numpy.mean(self.imdata[self.imdata > 0])
+        self.floor = numpy.min(self.imdata[self.imdata > 0])
+        self.nx = len(self.imdata[0])
+        self.ny = len(self.imdata)
+        self.npix = self.nx*self.ny
+
+    def Spot(self, p):
+        sig = p[0]
+        xc = p[1]
+        yc = p[2]
+
+        if (p[0] <= 0.0):
+            return numpy.zeros(self.ncutout)
+        if (p[1] < 0) or (p[1] > self.cutout_x):
+            return numpy.zeros(self.ncutout)
+        if (p[2] < 0) or (p[2] > self.cutout_y):
+            return numpy.zeros(self.ncutout)
+        x = numpy.arange(self.cutout_x)
+        y = numpy.arange(self.cutout_y)
+        image = numpy.zeros((self.cutout_x, self.cutout_x))
+
+        for i in range(self.cutout_x):
+            for j in range(self.cutout_y):
+                image[i][j] = 1.0*( numpy.exp(-(x[i]-xc)**2.0/sig)*
+                        numpy.exp(-(y[j]-yc)**2.0/sig))
+
+        maxval = numpy.max(image)
+        image = image/maxval
+        image[image < self.floor] = 0.0
+        return image.ravel()
+
+    def findCenter(self, x, y, ax=None):
+        """
+        cutout should be 8x8 grid of pixels
+        """
+
+        cutout = self.extractCutout(x, y)
+
+        if ax!=None:
+            ax.matshow(cutout)
+            ax.figure.show()
+            raw_input()
+        self.cutout_x = len(cutout[0])
+        self.cutout_y = len(cutout)
+        self.ncutout = self.cutout_x*self.cutout_y
+
+        sig = 2.4
+        xcenter = self.cutout_x/2.0
+        ycenter = self.cutout_y/2.0
+
+        errfunc = lambda p, y : numpy.abs(self.Spot(p) - y)
+        coeffs = [sig, xcenter, ycenter]
+        pfit, success = optimize.leastsq(errfunc, coeffs, args=(cutout.ravel()))
+
+        xfit = pfit[2] - xcenter + x
+        yfit = pfit[1] - ycenter + y
+        sigma = pfit[0]**0.5
+        return sigma, xfit, yfit, cutout
+
+    def extractCutout(self, x, y):
+        cutout = self.imdata[y-10:y+10, x-10:x+10]
+
+        return cutout.copy()
+
+class NGCImage( object):
+    def __init__(self, filename):
+        self.filename = filename
+        self.header = pyfits.getheader(filename)
+        self.data = pyfits.getdata(filename)
+
+    def subtract_background(self, background):
+        self.subtracted = self.data - background.data
+
+    def generate_model(self, n):
+        feature_width = int(n*self.spacing+4*self.fwhm)
+        feature_x = numpy.arange(feature_width)
+        feature_y = numpy.zeros(feature_width)
+
+        for i in range(n):
+            c = (i+1)*self.spacing
+            feature_y += self.height*numpy.exp(-(feature_x-c)**2.0/(2.0*self.fwhm/2.4)**2.0)
+
+        return feature_x, feature_y
+
+    def find_centers(self, n, collapse):
+        distance, height = self.generate_model(n)
+        y_corr = scipy.correlate(collapse, height)
+        x_corr = scipy.linspace(0, len(y_corr)-1, num =len(y_corr))
+
+        peak = x_corr[numpy.argsort(y_corr)[-1]]
+
+        centers = []
+        for i in range(n):
+            centers.append((i+1)*self.spacing+peak)
+
+        return numpy.array(centers)
+
+    def findSubapertureCenters(self, nx, ny):
+        self.nx = nx
+        self.ny = ny
+        self.xcollapse = self.subtracted.sum(axis=0)
+        self.ycollapse = self.subtracted.sum(axis=1)
+
+        self.fwhm = 2.5
+        self.spacing = 8.1
+        self.height = 0.75*numpy.max(self.xcollapse)
+
+        self.xcenters = self.find_centers(nx, self.xcollapse)
+        self.ycenters = self.find_centers(ny, self.ycollapse)
+
+    def TopHat(self, p):
+        sig_x = p[0]
+        sig_y = p[1]
+        theta = p[2]
+        amplitude = numpy.deg2rad(p[3])
+        xc = p[4]
+        yc = p[5]
+
+        if (sig_x < 0):# or (sig_x > 18.0):
+            return numpy.zeros(64)
+        if (sig_y < 0):# or (sig_y > 18.0):
+            return numpy.zeros(64)
+        fine_grid = numpy.linspace(0, 8)
+        fine_image = numpy.zeros((len(fine_grid), len(fine_grid)))
+
+        a = numpy.cos(theta)**2/(2.0*sig_x**2.0) + numpy.sin(theta)**2./(2.0*sig_y**2.0)
+        b = -numpy.sin(2.0*theta)**2/(4.0*sig_x**2.0) + numpy.sin(2.0*theta)**2./(4.0*sig_y**2.0)
+        c = numpy.sin(theta)**2/(2.0*sig_x**2.0) + numpy.cos(theta)**2./(2.0*sig_y**2.0)
+
+        indices = range(len(fine_grid))
+        
+        for x in indices:
+            for y in indices:
+                fine_image[x][y] = amplitude*numpy.exp(-(a*(fine_grid[x]-xc)**2.0 +
+                    2.0*b*(fine_grid[x]-xc)*(fine_grid[y]-yc) +
+                    c*(fine_grid[y]-yc)**2.0))
+
+        coarse_image = numpy.zeros((8,8))
+        for x in range(8):
+            for y in range(8):
+                goodx = numpy.arange(len(fine_grid))[(x <= fine_grid) & (fine_grid < x+1)]
+                goody = numpy.arange(len(fine_grid))[(y <= fine_grid) & (fine_grid < y+1)]
+                coarse_image[x][y] = numpy.sum(fine_image[goodx][:,goody])
+
+        return coarse_image.ravel()
+
+    def Elipse(self, p):
+        sig_x = p[0]
+        sig_y = sig_x*p[1]
+        theta = numpy.deg2rad(p[2])
+        xc = p[3]
+        yc = p[4]
+
+        #print sig_x
+        #print numpy.rad2deg(theta)
+        #raw_input()
+        if (p[1] >= 1.0):
+            return numpy.zeros(64)
+        if (p[2] < -180.0) or (p[2] > 180.0):
+            return numpy.zeros(64)
+        if (sig_x < 0):# or (sig_x > 18.0):
+            return numpy.zeros(64)
+        if (sig_y < 0):# or (sig_y > 18.0):
+            return numpy.zeros(64)
+        fine_grid = numpy.linspace(0, 8)
+        fine_image = numpy.zeros((len(fine_grid), len(fine_grid)))
+
+        a = numpy.cos(theta)**2/(2.0*sig_x**2.0) + numpy.sin(theta)**2./(2.0*sig_y**2.0)
+        b = -numpy.sin(2.0*theta)**2/(4.0*sig_x**2.0) + numpy.sin(2.0*theta)**2./(4.0*sig_y**2.0)
+        c = numpy.sin(theta)**2/(2.0*sig_x**2.0) + numpy.cos(theta)**2./(2.0*sig_y**2.0)
+
+        indices = range(len(fine_grid))
+        
+        for x in indices:
+            for y in indices:
+                fine_image[x][y] = numpy.exp(-(a*(fine_grid[x]-xc)**2.0 +
+                    2.0*b*(fine_grid[x]-xc)*(fine_grid[y]-yc) +
+                    c*(fine_grid[y]-yc)**2.0))
+
+        coarse_image = numpy.zeros((8,8))
+        for x in range(8):
+            for y in range(8):
+                goodx = numpy.arange(len(fine_grid))[(x <= fine_grid) & (fine_grid < x+1)]
+                goody = numpy.arange(len(fine_grid))[(y <= fine_grid) & (fine_grid < y+1)]
+                coarse_image[x][y] = numpy.sum(fine_image[goodx][:,goody])
+
+        cutoff = numpy.median(coarse_image) + numpy.std(coarse_image)
+        bright = coarse_image > cutoff
+        dark = coarse_image <= cutoff
+        coarse_image[bright] = 1.0
+        coarse_image[dark] /= cutoff
+        return coarse_image.ravel()
+
+    def fitElipse(self, cutout):
+        """
+        cutout should be 8x8 grid of pixels
+        """
+        sig_x = 2.4
+        e = 0.8
+        angle = 10.0
+        xcenter = 3.5
+        ycenter = 3.5
+
+        errfunc = lambda p, y : numpy.abs(self.Elipse(p) - y)
+        coeffs = [sig_x, e, angle, xcenter, ycenter]
+        pfit = optimize.leastsq(errfunc, coeffs, args=(cutout))
+
+        return pfit
+
+    def extractCutout(self, x, y):
+        xcenter = int(numpy.round(self.xcenters[x]))
+        ycenter = int(numpy.round(self.ycenters[y]))
+
+        cutout = self.subtracted[ycenter-4:ycenter+4, xcenter-4:xcenter+4]
+
+        return cutout.copy()
+
+    def twirl(self, ax1=None, ax2=None):
+        xp = numpy.arange(0, 8, 1.0)
+        yp = numpy.arange(0, 8, 1.0)
+        grid_x = numpy.linspace(0, 7)
+        grid_y = numpy.linspace(0, 7)
+        grid = numpy.meshgrid(grid_x, grid_y)
+        angles = numpy.arange(0, 360, 45.0)
+        for i in range(self.nx):
+            for j in range(self.ny):
+                x = self.xcenters[i]
+                y = self.ycenters[j]
+                cutout = self.extractCutout(i, j)
+                if not(ax1 == None):
+                    ax1.clear()
+                    ax2.matshow(cutout)
+                    ax1.figure.show()
+                if numpy.sum(cutout) > 400:
+                    f = scipy.interpolate.interp2d(xp, yp, cutout, kind='cubic')
+                    for theta in angles:
+                        rotated = rotate(grid, theta)
+                        print rotated
+                        raw_input()
+
+
+    def fitElipses(self, ax1=None, ax2=None, ax3=None):
+        sig_x = []
+        sig_y = []
+        angle = []
+        amplitude = []
+        xc = []
+        yc = []
+        for i in range(self.nx):
+            for j in range(self.ny):
+                x = self.xcenters[i]
+                y = self.ycenters[j]
+                cutout = self.extractCutout(i, j)
+                #print x, y, numpy.sum(cutout)
+                if not(ax1 == None):
+                    ax1.clear()
+                    ax1.matshow(cutout, vmin = 0, vmax = 1)
+                    ax1.figure.show()
+                if numpy.sum(cutout) > 400:
+                    cutoff = numpy.median(cutout)+ numpy.std(cutout)
+                    good = cutout > cutoff
+                    bad = cutout <= cutoff
+                    cutout[good] = 1.0
+                    cutout[bad] /= cutoff
+                    fit, result = self.fitElipse(cutout.ravel())
+                    if ax2 != None:
+                        ax2.clear()
+                        ax2.matshow(self.Elipse(fit).reshape(8,8), vmin = 0, vmax=1)
+                        ax2.figure.show()
+                        print fit
+                        raw_input()
+                    sig_x.append(fit[0])
+                    sig_y.append(fit[0]*fit[1])
+                    angle.append(fit[2])
+                    xc.append(fit[3]-3.5+x)
+                    yc.append(fit[3]-3.5+y)
+                    print sig_y[-1], angle[-1]
+        self.sig_x = numpy.array(sig_x)
+        self.sig_y = numpy.array(sig_y)
+        self.angle = numpy.array(angle)
+        self.amplitude = numpy.array(amplitude)
+        self.xc = numpy.array(xc)
+        self.yc = numpy.array(yc)
+
 
 def twoDgaussian(x, y, center, stdev, A):
     retval = A * (numpy.exp(-(x-center[0])**2.0/stdev[0])*
@@ -140,7 +437,7 @@ class WFS ( object ):
         self.beamSize = beamSize
         self.wavelength = wavelength
         self.centObscScale = 1.116/8.00
-        self.datadir = os.path.dirname(os.path.dirname(__file__))+'/data/'
+        self.datadir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))+'/data/'
         self.detector = detector(self, beamSize = beamSize)
         self.lenslet = lensletArray(self, angle = angle)
         self.wavefront = waveFront(self)
