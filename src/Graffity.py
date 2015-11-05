@@ -9,6 +9,7 @@ import matplotlib.pyplot as pyplot
 from scipy import optimize
 from scipy.ndimage import rotate
 from PIL import Image
+from scipy import signal
 
 
 class FLIRCamImage( object ):
@@ -50,12 +51,12 @@ class FLIRCamImage( object ):
         image[image < self.floor] = 0.0
         return image.ravel()
 
-    def findCenter(self, x, y, ax=None):
+    def findFocusCenter(self, x, y, ax=None):
         """
         cutout should be 8x8 grid of pixels
         """
 
-        cutout = self.extractCutout(x, y)
+        cutout = self.extractCutout(x, y, 10)
 
         if ax!=None:
             ax.matshow(cutout)
@@ -78,10 +79,55 @@ class FLIRCamImage( object ):
         sigma = pfit[0]**0.5
         return sigma, xfit, yfit, cutout
 
-    def extractCutout(self, x, y):
-        cutout = self.imdata[y-10:y+10, x-10:x+10]
+    def findPupilCenter(self, x, y, pupilImage=None, ax=None):
+        """
+        cutout should be 8x8 grid of pixels
+        """
 
-        return cutout.copy()
+        cutout = self.extractCutout(x, y, 70, chopTop=True)
+
+        cutoutZoom = self.zoomIn(cutout, 10.0)
+
+        if ax!=None:
+            corr = signal.correlate2d(cutoutZoom, pupilImage)
+            ax.matshow(corr)
+            ax.figure.show()
+            raw_input()
+            return 5
+        self.cutout_x = len(cutout[0])
+        self.cutout_y = len(cutout)
+        self.ncutout = self.cutout_x*self.cutout_y
+
+        sig = 2.4
+        xcenter = self.cutout_x/2.0
+        ycenter = self.cutout_y/2.0
+
+        errfunc = lambda p, y : numpy.abs(self.Spot(p) - y)
+        coeffs = [sig, xcenter, ycenter]
+        pfit, success = optimize.leastsq(errfunc, coeffs, args=(cutout.ravel()))
+
+        xfit = pfit[2] - xcenter + x
+        yfit = pfit[1] - ycenter + y
+        sigma = pfit[0]**0.5
+        return sigma, xfit, yfit, cutout
+
+    def extractCutout(self, x, y, size, chopTop=False):
+        cutout = self.imdata[y-size:y+size, x-size:x+size].copy()
+
+        if chopTop:
+            cutoff = numpy.mean(cutout)
+            cutout[cutout > cutoff] = 1.0
+        return cutout
+
+    def zoomIn(self, original, factor):
+        x = numpy.arange(original.shape[0])
+        y = numpy.arange(original.shape[1])
+        interpolator = scipy.interpolate.RectBivariateSpline(x, y, original)
+        new_x = numpy.linspace(0, x[-1], num=len(x)*factor)
+        new_y = numpy.linspace(0, y[-1], num=len(y)*factor)
+        xx, yy = numpy.meshgrid(new_x, new_y)
+        zoomed = interpolator.ev(xx, yy).reshape(len(x)*factor, len(y)*factor)
+        return zoomed
 
 class NGCImage( object):
     def __init__(self, filename):

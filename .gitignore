@@ -3,6 +3,9 @@ __pycache__/
 *.py[cod]
 
 *.png
+*.fits
+*.mp4
+*.gif
 
 # C extensions
 *.so
