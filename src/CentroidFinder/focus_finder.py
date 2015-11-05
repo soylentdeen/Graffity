@@ -62,5 +62,6 @@ for i in order:
 images2gif.writeGif('Focus_Runout.gif', frames, duration=0.5)
 #ax.matshow(image.imdata, vmin = 0.0, vmax=1.0)
 
+outfile.close()
 
 fig.show()

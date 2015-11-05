@@ -79,39 +79,28 @@ class FLIRCamImage( object ):
         sigma = pfit[0]**0.5
         return sigma, xfit, yfit, cutout
 
-    def findPupilCenter(self, x, y, pupilImage=None, ax=None):
+    def findPupilCenter(self, x, y, zoomFactor, pupilImage=None, ax=None):
         """
         cutout should be 8x8 grid of pixels
         """
 
-        cutout = self.extractCutout(x, y, 70, chopTop=True)
+        cutout = self.extractCutout(x, y, 80, chopTop=True)
 
-        cutoutZoom = self.zoomIn(cutout, 5.0)
+        cutoutZoom = self.zoomIn(cutout, zoomFactor)
+
+        corr = signal.correlate2d(cutoutZoom, pupilImage, boundary='fill', mode='valid')
+        xc, yc = numpy.unravel_index(numpy.argmax(corr), corr.shape)
+        xzp = corr.shape[0]/2.0
+        yzp = corr.shape[1]/2.0
+        xcent = (xc-xzp)/zoomFactor + x
+        ycent = (yc-yzp)/zoomFactor + y
 
         if ax!=None:
-            
-            #corr = signal.correlate2d(cutoutZoom, pupilImage, boundary='symm', mode='same')
-            #ax.matshow(corr)
-            ax.matshow(cutoutZoom)
+            ax.clear()
+            ax.matshow(corr)
             ax.figure.show()
             raw_input()
-            return 5
-        self.cutout_x = len(cutout[0])
-        self.cutout_y = len(cutout)
-        self.ncutout = self.cutout_x*self.cutout_y
-
-        sig = 2.4
-        xcenter = self.cutout_x/2.0
-        ycenter = self.cutout_y/2.0
-
-        errfunc = lambda p, y : numpy.abs(self.Spot(p) - y)
-        coeffs = [sig, xcenter, ycenter]
-        pfit, success = optimize.leastsq(errfunc, coeffs, args=(cutout.ravel()))
-
-        xfit = pfit[2] - xcenter + x
-        yfit = pfit[1] - ycenter + y
-        sigma = pfit[0]**0.5
-        return sigma, xfit, yfit, cutout
+        return xcent, ycent
 
     def extractCutout(self, x, y, size, chopTop=False):
         cutout = self.imdata[y-size:y+size, x-size:x+size].copy()
@@ -129,7 +118,6 @@ class FLIRCamImage( object ):
         new_y = numpy.linspace(0, y[-1], num=len(y)*factor)
         xx, yy = numpy.meshgrid(new_x, new_y)
         zoomed = interpolator.ev(xx, yy).reshape(len(x)*factor, len(y)*factor)
-        print asdf
         return zoomed
 
 class NGCImage( object):

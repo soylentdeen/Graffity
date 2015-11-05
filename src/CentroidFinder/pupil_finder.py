@@ -20,37 +20,53 @@ sigma = []
 angle = []
 cutouts = []
 
+xinit = 156
+yinit = 87
+width = 60
+
+ZF = 3.0
+
+
+image = Graffity.FLIRCamImage(files[0])
+pupilImage = image.zoomIn(image.extractCutout(xinit, yinit, width, chopTop=True), ZF)
+
+center = scipy.ndimage.measurements.center_of_mass(pupilImage)
+center_x = center[0]/ZF - width
+center_y = center[1]/ZF - width
+
 for df in files:
     image = Graffity.FLIRCamImage(df)
     angle.append(float(df.split('\\')[-1].split()[1].split('deg')[0]))
-    pupilImage = image.zoomIn(image.extractCutout(156, 87, 60, chopTop=True), 5.0)
-    blah = image.findPupilCenter(166, 87, pupilImage=pupilImage, ax = ax)
-    #sigma.append(blah[0])
-    #x.append(blah[1])
-    #y.append(blah[2])
-    #cutouts.append(blah[3]*255)
-    #cutouts.append(PIL.Image.fromarray(numpy.uint8(blah[3]*255)))
+    blah = image.findPupilCenter(166, 87, zoomFactor = ZF, pupilImage=pupilImage)
+    x.append(blah[0]+center_x)
+    y.append(blah[1]+center_y)
+    print x[-1], y[-1]
+    cutouts.append(image.imdata)
 
+ax.clear()
 x = numpy.array(x)
 y = numpy.array(y)
 angle = numpy.array(angle)
 order = numpy.argsort(angle)
-#ax.plot(x[order], y[order])
+ax.plot(x[order], y[order])
+
+#fig.show()
+#raw_input()
 
 frames = []
 buf = []
-outfile = open('Focus_Runout.txt', 'w')
+outfile = open('Pupil_Runout.txt', 'w')
 
 for i in order:
     ax.clear()
     ax.matshow(cutouts[i])
-    ax.plot(x[order]-166+10, y[order]-87+10, color = 'y', lw=4.0)
-    ax.scatter(x[i]-166+10, y[i]-87+10, color = 'k', s=85.0)
-    ax.set_xbound(lower=0, upper=19)
-    ax.set_ybound(lower=0, upper=19)
-    ax.text(1.0, 1.0, 'Angle = %d' % angle[i], fontsize=20, color = 'y')
-    ax.text(1.0, 2.0, 'X = %.2f' % x[i], fontsize=20, color = 'y')
-    ax.text(1.0, 3.0, 'Y = %.2f' % y[i], fontsize=20, color = 'y')
+    ax.plot(x[order], y[order], color = 'y', lw=4.0)
+    ax.scatter(x[i], y[i], color = 'k', s=85.0)
+    ax.set_xbound(lower=95, upper=230)
+    ax.set_ybound(lower=20, upper=160)
+    ax.text(100.0, 25.0, 'Angle = %d' % angle[i], fontsize=16, color = 'y')
+    ax.text(100.0, 30.0, 'X = %.2f' % x[i], fontsize=16, color = 'y')
+    ax.text(100.0, 35.0, 'Y = %.2f' % y[i], fontsize=16, color = 'y')
     buf.append(io.BytesIO())
     #fig.show()
     fig.savefig(buf[-1], format='png')
@@ -60,7 +76,7 @@ for i in order:
     #raw_input()
     frames.append(PIL.Image.open(buf[-1]))
 
-images2gif.writeGif('Focus_Runout.gif', frames, duration=0.5)
+images2gif.writeGif('Pupil_Runout.gif', frames, duration=0.5)
 #ax.matshow(image.imdata, vmin = 0.0, vmax=1.0)
 
 
