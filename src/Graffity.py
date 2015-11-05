@@ -86,11 +86,13 @@ class FLIRCamImage( object ):
 
         cutout = self.extractCutout(x, y, 70, chopTop=True)
 
-        cutoutZoom = self.zoomIn(cutout, 10.0)
+        cutoutZoom = self.zoomIn(cutout, 5.0)
 
         if ax!=None:
-            corr = signal.correlate2d(cutoutZoom, pupilImage)
-            ax.matshow(corr)
+            
+            #corr = signal.correlate2d(cutoutZoom, pupilImage, boundary='symm', mode='same')
+            #ax.matshow(corr)
+            ax.matshow(cutoutZoom)
             ax.figure.show()
             raw_input()
             return 5
@@ -127,6 +129,7 @@ class FLIRCamImage( object ):
         new_y = numpy.linspace(0, y[-1], num=len(y)*factor)
         xx, yy = numpy.meshgrid(new_x, new_y)
         zoomed = interpolator.ev(xx, yy).reshape(len(x)*factor, len(y)*factor)
+        print asdf
         return zoomed
 
 class NGCImage( object):

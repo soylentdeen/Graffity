@@ -23,7 +23,7 @@ cutouts = []
 for df in files:
     image = Graffity.FLIRCamImage(df)
     angle.append(float(df.split('\\')[-1].split()[1].split('deg')[0]))
-    pupilImage = image.zoomIn(image.extractCutout(156, 87, 60, chopTop=True), 10)
+    pupilImage = image.zoomIn(image.extractCutout(156, 87, 60, chopTop=True), 5.0)
     blah = image.findPupilCenter(166, 87, pupilImage=pupilImage, ax = ax)
     #sigma.append(blah[0])
     #x.append(blah[1])
