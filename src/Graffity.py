@@ -293,7 +293,7 @@ class NGCImage( object):
                     f = scipy.interpolate.interp2d(xp, yp, cutout, kind='cubic')
                     for theta in angles:
                         rotated = rotate(grid, theta)
-                        print rotated
+                        print("%s" % rotated)
                         raw_input()
 
 
@@ -325,14 +325,14 @@ class NGCImage( object):
                         ax2.clear()
                         ax2.matshow(self.Elipse(fit).reshape(8,8), vmin = 0, vmax=1)
                         ax2.figure.show()
-                        print fit
+                        print("%s%" % fit)
                         raw_input()
                     sig_x.append(fit[0])
                     sig_y.append(fit[0]*fit[1])
                     angle.append(fit[2])
                     xc.append(fit[3]-3.5+x)
                     yc.append(fit[3]-3.5+y)
-                    print sig_y[-1], angle[-1]
+                    print("%.3f, %.3f" %( sig_y[-1], angle[-1]))
         self.sig_x = numpy.array(sig_x)
         self.sig_y = numpy.array(sig_y)
         self.angle = numpy.array(angle)
@@ -344,7 +344,7 @@ class NGCImage( object):
 def twoDgaussian(x, y, center, stdev, A):
     retval = A * (numpy.exp(-(x-center[0])**2.0/stdev[0])*
                   numpy.exp(-(y-center[1])**2.0/stdev[1]))
-    print center, A, numpy.max(retval), numpy.max(x), numpy.min(x)
+    print("%.3f %.3f %.3f" % ( center, A, numpy.max(retval), numpy.max(x), numpy.min(x)))
     return retval
 
 class zernikeMode(object):
@@ -638,11 +638,11 @@ class detector( object ):
             ax3.matshow(extract[2])
             ax4.matshow(extract[2]-extract[0])
             fig.show()
-            print numpy.max(extract[0])
-            print numpy.max(extract[1])
-            print numpy.max(extract[2])
-            print numpy.max(extract[2]-extract[0])
-            raw_input()
+            print("%.3f" % numpy.max(extract[0]))
+            print("%.3f" % numpy.max(extract[1]))
+            print("%.3f" % numpy.max(extract[2]))
+            print("%.3f" % numpy.max(extract[2]-extract[0]))
+            input()
         self.z.append(z)
         self.centroids.append(numpy.array(centroids))
         self.scrambleFrame()
@@ -696,7 +696,7 @@ class detector( object ):
         for coord in self.lenslet.coords:
             x = coord[0]
             y = coord[1]
-            print "Not done yet!"
+            print ("Not done yet!")
                     
         
     def calcWaveFront(self, x, y):

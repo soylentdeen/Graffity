@@ -12,7 +12,7 @@ fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
 # Change this directory to the location of the .TIF files on your system
-directory= '/home/deen/Data/GRAVITY/Derotator/derotator/'
+directory= '/home/fprakt/Data/Derotator/derot_04112015/'
 # Change this to match the structure of the files
 files = glob.glob(directory+'pupil*001.TIF')
 
@@ -63,7 +63,7 @@ for df in files:
     centroid = image.findPupilCenter(XGUESS, YGUESS, zoomFactor = ZF, pupilImage=pupilImage)
     x.append(centroid[0]+center_x)
     y.append(centroid[1]+center_y)
-    print x[-1], y[-1]
+    print("%.3f, %.3f" % ( x[-1], y[-1]))
     cutouts.append(image.imdata)
 
 ax.clear()
@@ -91,9 +91,11 @@ for i in order:
     buf.append(io.BytesIO())
     fig.savefig(buf[-1], format='png')
     buf[-1].seek(0)
-    print angle[i], x[i], y[i]
+    print("%d %.3f %.3f" % ( angle[i], x[i], y[i]))
     outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
     frames.append(PIL.Image.open(buf[-1]))
+
+outfile.close()
 
 images2gif.writeGif('Pupil_Runout.gif', frames, duration=0.5)
 
