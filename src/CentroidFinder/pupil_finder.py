@@ -11,8 +11,39 @@ fig = pyplot.figure(0)
 fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
+# Change this directory to the location of the .TIF files on your system
 directory= '/home/deen/Data/GRAVITY/Derotator/derotator/'
-files = glob.glob(directory+'pupil*.TIF')
+# Change this to match the structure of the files
+files = glob.glob(directory+'pupil*001.TIF')
+
+# These are the (x,y) coordinates and radius of the pupil cutout
+xinit = 156
+yinit = 87
+width = 60
+# Zoom Factor - how finely you want to sample the grid
+ZF = 3.0
+
+# Want to check how the Pupil Image looks like?  Set to True
+checkPupil = False
+
+image = Graffity.FLIRCamImage(files[0])
+pupilImage = image.zoomIn(image.extractCutout(xinit, yinit, width, chopTop=True), ZF)
+
+if checkPupil:
+    ax.matshow(pupilImage)
+    fig.show()
+    raw_input()
+    ax.clear()
+
+# Measures the center of mass of the Pupil Image
+center = scipy.ndimage.measurements.center_of_mass(pupilImage)
+center_x = center[0]/ZF - width
+center_y = center[1]/ZF - width
+
+
+# GUESSES for the rotation axis (in pixels)
+XGUESS = 167
+YGUESS = 87
 
 x = []
 y = []
@@ -20,26 +51,18 @@ sigma = []
 angle = []
 cutouts = []
 
-xinit = 156
-yinit = 87
-width = 60
 
-ZF = 3.0
-
-
-image = Graffity.FLIRCamImage(files[0])
-pupilImage = image.zoomIn(image.extractCutout(xinit, yinit, width, chopTop=True), ZF)
-
-center = scipy.ndimage.measurements.center_of_mass(pupilImage)
-center_x = center[0]/ZF - width
-center_y = center[1]/ZF - width
-
+# Start the loop
 for df in files:
-    image = Graffity.FLIRCamImage(df)
+    image = Graffity.FLIRCamImage(df)        # Read in the next file
+    
+    # parse the angle from the filename
     angle.append(float(df.split('\\')[-1].split()[1].split('deg')[0]))
-    blah = image.findPupilCenter(166, 87, zoomFactor = ZF, pupilImage=pupilImage)
-    x.append(blah[0]+center_x)
-    y.append(blah[1]+center_y)
+    
+    # Finds the center of the image by cross-correlation routine
+    centroid = image.findPupilCenter(XGUESS, YGUESS, zoomFactor = ZF, pupilImage=pupilImage)
+    x.append(centroid[0]+center_x)
+    y.append(centroid[1]+center_y)
     print x[-1], y[-1]
     cutouts.append(image.imdata)
 
@@ -50,8 +73,6 @@ angle = numpy.array(angle)
 order = numpy.argsort(angle)
 ax.plot(x[order], y[order])
 
-#fig.show()
-#raw_input()
 
 frames = []
 buf = []
@@ -68,16 +89,12 @@ for i in order:
     ax.text(100.0, 30.0, 'X = %.2f' % x[i], fontsize=16, color = 'y')
     ax.text(100.0, 35.0, 'Y = %.2f' % y[i], fontsize=16, color = 'y')
     buf.append(io.BytesIO())
-    #fig.show()
     fig.savefig(buf[-1], format='png')
     buf[-1].seek(0)
     print angle[i], x[i], y[i]
     outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
-    #raw_input()
     frames.append(PIL.Image.open(buf[-1]))
 
 images2gif.writeGif('Pupil_Runout.gif', frames, duration=0.5)
-#ax.matshow(image.imdata, vmin = 0.0, vmax=1.0)
 
 
-fig.show()
