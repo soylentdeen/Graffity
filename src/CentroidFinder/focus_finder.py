@@ -11,8 +11,8 @@ fig = pyplot.figure(0)
 fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
-directory= '/home/deen/Data/GRAVITY/Derotator/derotator/'
-files = glob.glob(directory+'focus*.TIF')
+directory= '/home/fprakt/Data/Derotator/derot_04112015/'
+files = glob.glob(directory+'focus*001.TIF')
 
 x = []
 y = []
@@ -54,14 +54,14 @@ for i in order:
     #fig.show()
     fig.savefig(buf[-1], format='png')
     buf[-1].seek(0)
-    print angle[i], x[i], y[i]
+    print("%d %.3f %.3f" % ( angle[i], x[i], y[i]))
     outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
     #raw_input()
     frames.append(PIL.Image.open(buf[-1]))
 
+outfile.close()
 images2gif.writeGif('Focus_Runout.gif', frames, duration=0.5)
 #ax.matshow(image.imdata, vmin = 0.0, vmax=1.0)
 
-outfile.close()
 
 fig.show()
