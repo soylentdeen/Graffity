@@ -8,7 +8,7 @@ How to measure the Pupil and Focus runouts
 
 1) Open a terminal.  Type:
 
-    source ~/.tcsh   (Only necessary until I figure out how to make this automatic (i.e. I ask Udo))
+    source ~/.tcshrc   (Only necessary until I figure out how to make this automatic (i.e. I ask Udo))
 
 2) change the hard-coded directories and file name structures in the /home/fprakt/Code/Graffity/src/CentroidFinder/ files
 
@@ -17,7 +17,7 @@ How to measure the Pupil and Focus runouts
      line 15 : files = glob.glob(directory+'focus*001.TIF')  <- Ensure this follows filename format
    pupil_finder.py
      line 16 : directory= '/home/fprakt/Data/Derotator/derot_04112015/'
-     line 17 : files = glob.glob(directory+'pupil*001.TIF') <- Ensure this follows filnemae format
+     line 17 : files = glob.glob(directory+'pupil*001.TIF') <- Ensure this follows filename format
 
   (If pupil has moved significantly, you might want to change the X and Y values for the pupil given in lines 20-24 of pupil_finder.py)
   

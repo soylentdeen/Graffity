@@ -24,7 +24,7 @@ width = 60
 ZF = 3.0
 
 # Want to check how the Pupil Image looks like?  Set to True
-checkPupil = False
+checkPupil = True
 
 image = Graffity.FLIRCamImage(files[0])
 pupilImage = image.zoomIn(image.extractCutout(xinit, yinit, width, chopTop=True), ZF)
@@ -32,7 +32,7 @@ pupilImage = image.zoomIn(image.extractCutout(xinit, yinit, width, chopTop=True)
 if checkPupil:
     ax.matshow(pupilImage)
     fig.show()
-    raw_input()
+    input()
     ax.clear()
 
 # Measures the center of mass of the Pupil Image
