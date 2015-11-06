@@ -9,6 +9,8 @@ fig = pyplot.figure(0)
 fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
+blah
+
 pupilFile = open('Pupil_Runout.txt', 'r')
 focusFile = open('Focus_Runout.txt', 'r')
 zoltanFile = open('wobble.txt', 'r')
