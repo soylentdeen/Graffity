@@ -153,7 +153,7 @@ class NGCImage( object):
 
         return numpy.array(centers)
 
-    def findSubapertureCenters(self, nx, ny):
+    def findSubapertureCenters(self, nx=20, ny=21):
         self.nx = nx
         self.ny = ny
         self.xcollapse = self.subtracted.sum(axis=0)
@@ -338,7 +338,29 @@ class NGCImage( object):
         self.angle = numpy.array(angle)
         self.amplitude = numpy.array(amplitude)
         self.xc = numpy.array(xc)
+
+    def findCentroids(self):
+        xc = []
+        yc = []
+        for i in range(self.nx):
+            for j in range(self.ny):
+                x = self.xcenters[i]
+                y = self.ycenters[j]
+                cutout = self.extractCutout(i, j)
+                if numpy.sum(cutout) > 400:
+                    centroid = scipy.ndimage.measurements.center_of_mass(cutout)
+                    xc.append(centroid[0] - len(cutout[0])/2.0+x)
+                    yc.append(centroid[1] - len(cutout)/2.0+y)
+
+        self.xc = numpy.array(xc)
         self.yc = numpy.array(yc)
+
+
+    def findAngles(self):
+        for x in self.xcenters:
+            selected = numpy.abs(self.xc - x) < 2.0
+
+
 
 
 def twoDgaussian(x, y, center, stdev, A):
