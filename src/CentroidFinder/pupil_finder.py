@@ -12,7 +12,7 @@ fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
 # Change this directory to the location of the .TIF files on your system
-directory= '/home/fprakt/Data/Derotator/derot_04112015/'
+directory= '/home/fprakt/Data/Derotator/derot_10112015/'
 # Change this to match the structure of the files
 files = glob.glob(directory+'pupil*001.TIF')
 
@@ -57,7 +57,7 @@ for df in files:
     image = Graffity.FLIRCamImage(df)        # Read in the next file
     
     # parse the angle from the filename
-    angle.append(float(df.split('\\')[-1].split()[1].split('deg')[0]))
+    angle.append(float(df.split('/')[-1].split('_')[1].split('deg')[0]))
     
     # Finds the center of the image by cross-correlation routine
     centroid = image.findPupilCenter(XGUESS, YGUESS, zoomFactor = ZF, pupilImage=pupilImage)
@@ -76,7 +76,10 @@ ax.plot(x[order], y[order])
 
 frames = []
 buf = []
-outfile = open('Pupil_Runout.txt', 'w')
+#outfile = open('Pupil_Runout_10nov.txt', 'w')
+outfile = open('../derotator2/pupil_0.txt', 'w')
+outfile.write("%5s %16s %16s\n" % ( 'angle', 'x' , 'y'))
+outfile.write("%5s %16s %16s\n" % ( '-----', '-------------', '---------'))
 
 for i in order:
     ax.clear()
@@ -92,11 +95,12 @@ for i in order:
     fig.savefig(buf[-1], format='png')
     buf[-1].seek(0)
     print("%d %.3f %.3f" % ( angle[i], x[i], y[i]))
-    outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
+    outfile.write("%5s %16s %16s\n" % ( '%.1f' % angle[i], '%.5f' % x[i], '%.5f' %y [i]))
+    #outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
     frames.append(PIL.Image.open(buf[-1]))
 
 outfile.close()
 
-images2gif.writeGif('Pupil_Runout.gif', frames, duration=0.5)
+#images2gif.writeGif('Pupil_Runout.gif', frames, duration=0.5)
 
 
