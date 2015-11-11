@@ -339,7 +339,7 @@ class NGCImage( object):
         self.amplitude = numpy.array(amplitude)
         self.xc = numpy.array(xc)
 
-    def findCentroids(self):
+    def findCentroids(self, ax = None):
         xc = []
         yc = []
         for i in range(self.nx):
@@ -349,11 +349,24 @@ class NGCImage( object):
                 cutout = self.extractCutout(i, j)
                 if numpy.sum(cutout) > 400:
                     centroid = scipy.ndimage.measurements.center_of_mass(cutout)
-                    xc.append(centroid[0] - len(cutout[0])/2.0+x)
-                    yc.append(centroid[1] - len(cutout)/2.0+y)
+                    xc.append(centroid[1] - len(cutout[0])/2.0+x)
+                    yc.append(centroid[0] - len(cutout)/2.0+y)
+                    if not(ax == None):
+                        ax.clear()
+                        ax.matshow(cutout)
+                        ax.scatter(centroid[1], centroid[0], size=50)
+                        ax.figure.show()
+                        raw_input()
 
         self.xc = numpy.array(xc)
         self.yc = numpy.array(yc)
+
+        self.residual_x = self.xc % 1
+        self.residual_y = self.yc % 1
+
+        self.residual_x[self.residual_x > 0.5] -= 1.0
+        self.residual_y[self.residual_y > 0.5] -= 1.0
+
 
     def fit_line(self, x, y):
         fitfunc = lambda p, x : p[0]+(x*p[1])
@@ -372,8 +385,6 @@ class NGCImage( object):
             fit = self.fit_line(self.yc[selected], self.xc[selected])
             if not(ax == None):
                 ax.plot(fit[0][0]+fit[0][1]*self.yc[selected], self.yc[selected], color = 'r')
-                #ax.plot(fit[0][0]+meanx*self.yc[selected], self.yc[selected], color = 'k')
-                #ax.plot(numpy.ones(len(self.xc[selected]))*numpy.mean(self.xc[selected]), self.yc[selected], color = 'b')
             #differences.append(fit[0][0]+fit[0][1]*yc[col] - xc[col])
             xangle.append(numpy.arctan(fit[0][1])*180.0/3.14159)
 
@@ -383,16 +394,16 @@ class NGCImage( object):
             fit = self.fit_line(self.xc[selected], self.yc[selected])
             if not(ax == None):
                 ax.plot(self.xc[selected], fit[0][0]+fit[0][1]*self.xc[selected], color = 'r')
-                #ax.plot(self.xc[selected], fit[0][0]+meanx*self.xc[selected], color = 'k')
-                #ax.plot(self.xc[selected], numpy.ones(len(self.xc[selected]))*numpy.mean(self.xc[selected]), color = 'b')
             #differences.append(fit[0][0]+fit[0][1]*yc[col] - xc[col])
             yangle.append(numpy.arctan(fit[0][1])*180.0/3.14159)
 
         if not(ax==None):
-            ax.scatter(self.xc, self.yc)
+            ax.scatter(self.xc, self.yc, s=10, c='r')
 
+        self.xangle = xangle
+        self.yangle = yangle
 
-        return xangle, yangle
+    
 
 
 

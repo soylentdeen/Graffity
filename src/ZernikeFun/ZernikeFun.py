@@ -35,6 +35,7 @@ def getChoice():
         print("  -(D)isplay current Zernike coefficients")
         print("  -Enter (A)bsolute Zernike coefficients")
         print("  -Enter (R)elative Zernike coefficient offsets")
+        print("  -(M)ove the Tip/Tilt Mount")
         print("  -(Q)uit")
         print("====================================================================")
         choice = input("Your choice:")
@@ -96,6 +97,8 @@ fig.show()
 
 choice = getChoice()
 
+Tip = 0.0
+Tilt = 0.0
 
 while choice != 'Q':
     if choice == 'R':
@@ -121,8 +124,8 @@ while choice != 'Q':
                 fig.canvas.draw()
 
                 # Set TT to Zero
-                current = numpy.append(current, 0.0)
-                current = numpy.append(current, 0.0)
+                current = numpy.append(current, Tip)
+                current = numpy.append(current, Tilt)
             
                 sendPattern(current, ssh)
             except:
@@ -149,8 +152,8 @@ while choice != 'Q':
                 fig.canvas.draw()
     
                 # Set TT to Zero
-                current = numpy.append(current, 0.0)
-                current = numpy.append(current, 0.0)
+                current = numpy.append(current, Tip)
+                current = numpy.append(current, Tilt)
                 
                 sendPattern(current, ssh)
             except:
