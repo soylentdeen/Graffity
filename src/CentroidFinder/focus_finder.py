@@ -11,7 +11,7 @@ fig = pyplot.figure(0)
 fig.clear()
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
-directory= '/home/fprakt/Data/Derotator/derot_04112015/'
+directory= '/home/fprakt/Data/Derotator/derot_10112015/'
 files = glob.glob(directory+'focus*001.TIF')
 
 x = []
@@ -22,7 +22,7 @@ cutouts = []
 
 for df in files:
     image = Graffity.FLIRCamImage(df)
-    angle.append(float(df.split('\\')[-1].split()[1].split('deg')[0]))
+    angle.append(float(df.split('/')[-1].split('_')[1].split('deg')[0]))
     blah = image.findFocusCenter(166, 87)
     sigma.append(blah[0])
     x.append(blah[1])
@@ -38,7 +38,10 @@ order = numpy.argsort(angle)
 
 frames = []
 buf = []
-outfile = open('Focus_Runout.txt', 'w')
+#outfile = open('Focus_Runout_10nov.txt', 'w')
+outfile = open('focus_0.txt', 'w')
+outfile.write("%5s %16s %16s\n" % ( 'angle', 'x' , 'y'))
+outfile.write("%5s %16s %16s\n" % ( '-----', '-------------', '---------'))
 
 for i in order:
     ax.clear()
@@ -54,8 +57,9 @@ for i in order:
     #fig.show()
     fig.savefig(buf[-1], format='png')
     buf[-1].seek(0)
-    print("%d %.3f %.3f" % ( angle[i], x[i], y[i]))
-    outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
+    print("%5s %17s %17s" % ( '%.1f' % angle[i], '%.5f' % x[i], '%.5f' %y [i]))
+    outfile.write("%5s %16s %16s\n" % ( '%.1f' % angle[i], '%.5f' % x[i], '%.5f' %y [i]))
+    #outfile.write("%d %.2f %.2f\n" % (angle[i], x[i], y[i]))
     #raw_input()
     frames.append(PIL.Image.open(buf[-1]))
 
