@@ -1,6 +1,10 @@
 import scipy
 import numpy
 import Graffity
+import matplotlib.pyplot as pyplot
+
+fig = pyplot.figure(0)
+ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 
 #Number of rows, columns
 nx = 21
@@ -16,4 +20,6 @@ light.findSubapertureCenters(nx=nx, ny=ny)
 
 light.findCentroids()
 
-light.findAngles()
+xangles, yangles = light.findAngles(ax=ax)
+
+fig.show()

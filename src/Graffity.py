@@ -355,11 +355,44 @@ class NGCImage( object):
         self.xc = numpy.array(xc)
         self.yc = numpy.array(yc)
 
+    def fit_line(self, x, y):
+        fitfunc = lambda p, x : p[0]+(x*p[1])
+        errfunc = lambda p, x, y: numpy.abs(fitfunc(p,x) - y)
+        coeffs = [numpy.mean(y), 0.1]
+        pfit = optimize.leastsq(errfunc, coeffs, args=(x,y) )
 
-    def findAngles(self):
+        #return numpy.arctan(numpy.abs(pfit[0][1]))*180.0/3.14159262
+        return pfit
+
+
+    def findAngles(self, ax = None):
+        xangle = []
         for x in self.xcenters:
             selected = numpy.abs(self.xc - x) < 2.0
+            fit = self.fit_line(self.yc[selected], self.xc[selected])
+            if not(ax == None):
+                ax.plot(fit[0][0]+fit[0][1]*self.yc[selected], self.yc[selected], color = 'r')
+                #ax.plot(fit[0][0]+meanx*self.yc[selected], self.yc[selected], color = 'k')
+                #ax.plot(numpy.ones(len(self.xc[selected]))*numpy.mean(self.xc[selected]), self.yc[selected], color = 'b')
+            #differences.append(fit[0][0]+fit[0][1]*yc[col] - xc[col])
+            xangle.append(numpy.arctan(fit[0][1])*180.0/3.14159)
 
+        yangle = []
+        for y in self.ycenters:
+            selected = numpy.abs(self.yc - y) < 2.0
+            fit = self.fit_line(self.xc[selected], self.yc[selected])
+            if not(ax == None):
+                ax.plot(self.xc[selected], fit[0][0]+fit[0][1]*self.xc[selected], color = 'r')
+                #ax.plot(self.xc[selected], fit[0][0]+meanx*self.xc[selected], color = 'k')
+                #ax.plot(self.xc[selected], numpy.ones(len(self.xc[selected]))*numpy.mean(self.xc[selected]), color = 'b')
+            #differences.append(fit[0][0]+fit[0][1]*yc[col] - xc[col])
+            yangle.append(numpy.arctan(fit[0][1])*180.0/3.14159)
+
+        if not(ax==None):
+            ax.scatter(self.xc, self.yc)
+
+
+        return xangle, yangle
 
 
 
