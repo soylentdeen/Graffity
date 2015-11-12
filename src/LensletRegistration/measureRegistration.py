@@ -27,10 +27,12 @@ light.findCentroids()
 #ax.matshow(light.subtracted
 light.findAngles(ax=ax)
 
-print("Angle of Rows: %.3f degrees" % numpy.mean(light.xangle))
-print("Angle of Colunns: %.3f degrees" % numpy.mean(light.yangle))
+print("Angle of Rows: %.3f +/- %.3f degrees" % (numpy.mean(light.xangle), 
+    numpy.std(light.xangle)))
+print("Angle of Colunns: %.3f +/- %.3f degrees" % (numpy.mean(light.yangle),
+    numpy.std(light.yangle)))
 
-print("X offset = %.3f" % numpy.mean(light.residual_x))
-print("Y offset = %.3f" % numpy.mean(light.residual_x))
+print("X offset = %.4f" % numpy.mean(light.residual_x))
+print("Y offset = %.4f" % numpy.mean(light.residual_y))
 #ax.set_aspect('auto')
 fig.show()
