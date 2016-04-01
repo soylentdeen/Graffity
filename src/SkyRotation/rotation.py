@@ -34,15 +34,17 @@ for t in HA:
     az.append(numpy.arccos((numpy.sin(dec) - numpy.sin(alt[-1])*numpy.sin(lat))/
         (numpy.cos(alt[-1])*numpy.cos(lat))))
 
-    RA.append(-numpy.rad2deg(alt[-1])+numpy.rad2deg(az[-1])+90)
+    #RA.append(-numpy.rad2deg(alt[-1])+numpy.rad2deg(az[-1])+90)
+    RA.append(numpy.rad2deg(az[-1])+90)
+    
     if len(RA) == 1:
         delta.append(0.0)
     else:
         delta.append((RA[-1] - RA[-2])/delta_t)
 
-#ax.plot(numpy.rad2deg(HA)/360.0*24.0, RA)
+ax.plot(numpy.rad2deg(HA)/360.0*24.0, RA)
 #ax.plot(HA, RA)
-ax.plot(numpy.rad2deg(HA[1:])/360.0*24.0, numpy.array(delta[1:]), lw=2.0)
+#ax.plot(numpy.rad2deg(HA[1:])/360.0*24.0, numpy.array(delta[1:]), lw=2.0)
 ax.set_xbound(lower=-12, upper=12)
 #ax.plot(numpy.rad2deg(HA)/360.0*24.0, alt)
 #ax.plot(numpy.rad2deg(HA)/360.0*24.0, az)

@@ -10,10 +10,12 @@ from scipy import optimize
 from scipy.ndimage import rotate
 from PIL import Image
 from scipy import signal
+from scipy import linalg
 
 class CircularBuffer( object ):
-    def __init__(self, df):
+    def __init__(self, df='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None):
         self.df = df
+        self.directory = os.path.dirname(self.df)
         self.header = pyfits.getheader(df)
         self.data = pyfits.getdata(df)
         self.columns = self.data.columns
@@ -21,6 +23,135 @@ class CircularBuffer( object ):
         self.Gradients = self.data.field('Gradients')
         self.HODM = self.data.field('HODM_Positions')
         self.TTM = self.data.field('ITTM_Positions')
+        self.time = self.data.field('Seconds')+self.data.field('USeconds')/100000.0
+        self.time -= self.time[0]
+        if S2M != None:
+            self.S2M = pyfits.getdata(S2M)
+        else:
+            self.S2M = None
+        if ModalBasis != None:
+            self.ModalBasis = pyfits.getdata(ModalBasis, ignore_missing_end=True)
+        else:
+            self.ModalBasis = None
+        if Z2DM != None:
+            self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
+            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+        else:
+            self.Z2DM = pyfits.getdata('../../data/cimdatZernike2DM.fits', 
+                    ignore_missing_end=True)
+            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+        if S2Z != None:
+            self.S2Z = pyfits.getdata(Z2DM, ignore_missing_end=True)
+            self.Z2S = scipy.linalg.pinv(self.S2Z)
+        else:
+            self.S2Z = pyfits.getdata('../../data/Slopes2Z.fits', 
+                    ignore_missing_end=True)
+            self.Z2S = scipy.linalg.pinv(self.S2Z)
+
+    def loadTemplateMaps(self):
+        self.expno = self.header.get("HIERARCH ESO TPL EXPNO")
+        self.HO_ACT_REF_MAP = pyfits.getdata(self.directory+
+                '/HOCtr.ACT_POS_REF_MAP_%04d.fits' %(self.expno+1))
+        self.CM = pyfits.getdata(self.directory+
+                '/Recn.REC1.CM_%04d.fits' % (self.expno+1))
+        self.S2M = pyfits.getdata(self.directory+
+                '/RecnOptimiser.S2M_%04d.fits' % (self.expno+1))
+        self.M2V = pyfits.getdata(self.directory+
+                '/RecnOptimiser.M2V_%04d.fits' % (self.expno+1))
+        self.V2M = scipy.linalg.pinv(self.M2V)
+        self.getDisturbanceRegions()
+
+    def getDisturbanceRegions(self):
+        disturbance = []
+        calm = []
+        for i in range(len(self.HODM)):
+            if (self.HODM[i] == self.HO_ACT_REF_MAP).all():
+                calm.append(i)
+            else:
+                disturbance.append(i)
+        self.disturbance = numpy.array(disturbance)
+        self.calm = numpy.array(calm)
+
+    def getAberrations(self):
+        calmSlopes = numpy.average(self.Gradients[self.calm], axis=0)
+        meanActPos = self.CM.dot(calmSlopes)
+        #self.aberrations = self.calculateMirrorZernikes(self.HO_ACT_REF_MAP[0]
+        #        + meanActPos[:-2])
+        self.aberrations = self.calculateMirrorZernikes(meanActPos[:-2])
+        return self.aberrations
+        
+        
+
+    def calculateMirrorZernikes(self, MirrorPosition):
+        self.MirrorZernikes = self.DM2Z.T.dot(MirrorPosition)
+        return self.MirrorZernikes
+
+    def calculatePSD(self):
+        self.modes = []
+        for frame in self.Gradients:
+            self.modes.append(self.S2M.dot(frame))
+
+        self.modes = numpy.array(self.modes).T
+        self.FFT = fftpack.fftshift(fftpack.fft(self.modes))
+        self.FFT = self.FFT * self.FFT.conjugate()
+        self.freq = fftpack.fftshift(fftpack.fftfreq(len(self.modes[0]), 1.0/526.7))
+
+    def extractModulation(self, ax = None):
+        firstActuator = self.HODM[:,0]
+        modulation = numpy.arange(len(firstActuator))[firstActuator != firstActuator[0]]
+        self.modulation_start = modulation[0]
+        self.modulation_stop = modulation[-1]
+        self.modes = []
+        if ax != None:
+            ax.clear()
+        for frame in self.HODM[self.modulation_start:self.modulation_stop]:
+            self.modes.append(self.ModalBasis.dot(frame))
+            if ax != None:
+                ax.plot(self.modes[-1])
+        self.modes = numpy.array(self.modes)
+        if ax != None:
+            ax.figure.show()
+            raw_input('Press Enter to Continue')
+
+    def extractIM(self, ax = None):
+        counter = 0
+        IM = []
+        for m in self.HODM[self.modulation_start:self.modulation_stop].T:
+            response = []
+            counter += 1
+            for slope in self.Gradients[self.modulation_start+1:self.modulation_stop+1,:].T:
+                response.append(scipy.signal.correlate(slope, m, mode='valid')[0])
+            IM.append(response)
+        
+        self.IM = numpy.array(IM)
+        if ax != None:
+            ax.clear()
+            ax.imshow(self.IM.T)
+            ax.figure.show()
+            raw_input()
+
+    def processSlopes(self):
+        self.ProcessedGradients = ProcessedData(self.Gradients, self.S2M, self.S2Z)
+        
+    def processVoltages(self):
+        self.ProcessedVoltages = ProcessedData(self.HODM, self.V2M[:,:-2]/1e-6,
+                self.DM2Z.T/1e-6)
+        
+
+class ProcessedData ( object ):
+    def __init__(self, data, modeProjection, zernikeProjection):
+        self.average = numpy.average(data, axis=0)
+        modes = []
+        zerns = []
+        for frame in data:
+            modes.append(modeProjection.dot(frame))
+            zerns.append(zernikeProjection.dot(frame))
+        self.modes = numpy.array(modes)
+        self.modes_average = numpy.average(self.modes, axis=0)
+        self.modes_std = numpy.std(self.modes, axis=0)
+        self.zerns = numpy.array(zerns)
+        self.zerns_average = numpy.average(self.zerns, axis=0)
+        self.zerns_std = numpy.std(self.zerns, axis=0)
 
 class Controller( object ):
     def __init__(self, CM = None, iTT2HO=None, TT2HO=None):
@@ -36,7 +167,7 @@ class Controller( object ):
 class LoopAnalyzer( object):
     def __init__(self, HOCtr=None, CB =None):
         self.HOCtr = HOCtr
-        self.CB = CB
+        self.CB = CircularBuffer(CB)
         self.predictions = []
 
     def predict(self):
@@ -592,7 +723,8 @@ class WFS ( object ):
         self.derotator = derotator(self)
         self.centroids = []
 
-    def setupInstrument(self, zern, pupil, actuatorPokes, derotAngle, lensletAngle):
+    def setupInstrument(self, zern=None, pupil=None, actuatorPokes=None,
+            derotAngle=0.0, lensletAngle=0.0):
         """
         Generates an image seen by the detector of a wavefront described by
         the zernike coefficients in zern
@@ -605,7 +737,8 @@ class WFS ( object ):
         self.lenslet.setClockingAngle(lensletAngle)
         self.pupil.setDecenter(pupil[0], pupil[1])
         self.wavefront.setZern(zern)
-        self.DM.setMirror(actuatorPokes)
+        if actuatorPokes != None:
+            self.DM.setMirror(actuatorPokes)
 
     def expose(self):
         self.centroids.append(self.detector.expose())
@@ -890,22 +1023,31 @@ class waveFront( object ):
     """
     This object describes the wavefront as it hits the lenslet array
     """
-    def __init__(self, parent, beamSize = 1776.0):
+    def __init__(self, parent, beamSize = 1776.0, nZern = 12):
         self.parent = parent
         self.beamSize = beamSize
-        self.tip = zernikeMode(2, 0.00)
-        self.tilt = zernikeMode(3, 0.00)
-        self.defocus = zernikeMode(4, 0.00)
-        self.astig1 = zernikeMode(5, 0.00)
-        self.astig2 = zernikeMode(6, 0.00)
+        
+        self.zernikes = []
+        self.nZern = nZern
+        for i in numpy.arange(2, self.nZern):
+            self.zernikes.append(i, 0.0)
+
+        #self.tip = zernikeMode(2, 0.00)
+        #self.tilt = zernikeMode(3, 0.00)
+        #self.defocus = zernikeMode(4, 0.00)
+        #self.astig1 = zernikeMode(5, 0.00)
+        #self.astig2 = zernikeMode(6, 0.00)
     
     def setZern(self, zern):
         """
             Sets the magnitudes of the Zernike components.
         """
-        for mag, z in zip(zern,
-                [self.tip, self.tilt, self.defocus, self.astig1, self.astig2]):
-            z.setMag(mag*2.0*numpy.pi/self.parent.wavelength)
+        nzern = numpy.min([len(zern), self.nZern])
+        for i in range(nzern):
+            self.zernikes[i].setMag(zern[i]*2.0*numpy.pi/self.parent.wavelength)
+        #for mag, z in zip(zern,
+        #        [self.tip, self.tilt, self.defocus, self.astig1, self.astig2]):
+        #    z.setMag(mag*2.0*numpy.pi/self.parent.wavelength)
 
     def calcWaveFront(self, x, y):
         """
@@ -915,7 +1057,7 @@ class waveFront( object ):
         rho = (x**2.0 + y**2.0)**(0.5)/(self.beamSize/2.0)
         phi = numpy.arctan2(y, x)
         value = 0.0
-        for zern in [self.tip, self.tilt, self.defocus,self.astig1,self.astig2]:
+        for zern in self.zernikes:
             value += zern.zernike(rho, phi)
         return value
 
