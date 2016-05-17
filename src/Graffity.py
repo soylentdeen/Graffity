@@ -23,6 +23,7 @@ class CircularBuffer( object ):
         self.Gradients = self.data.field('Gradients')
         self.HODM = self.data.field('HODM_Positions')
         self.TTM = self.data.field('ITTM_Positions')
+        self.FrameCounter = self.data.field('FrameCounter')
         self.time = self.data.field('Seconds')+self.data.field('USeconds')/100000.0
         self.time -= self.time[0]
         if S2M != None:
@@ -61,16 +62,23 @@ class CircularBuffer( object ):
         self.V2M = scipy.linalg.pinv(self.M2V)
         self.getDisturbanceRegions()
 
-    def getDisturbanceRegions(self):
-        disturbance = []
-        calm = []
-        for i in range(len(self.HODM)):
-            if (self.HODM[i] == self.HO_ACT_REF_MAP).all():
-                calm.append(i)
-            else:
-                disturbance.append(i)
-        self.disturbance = numpy.array(disturbance)
-        self.calm = numpy.array(calm)
+    def getDisturbanceRegions(self, start = None, stop = None):
+        if start == None:
+            disturbance = []
+            calm = []
+            for i in range(len(self.HODM)):
+                if (self.HODM[i] == self.HO_ACT_REF_MAP).all():
+                    calm.append(i)
+                else:
+                    disturbance.append(i)
+            self.disturbance = numpy.array(disturbance)
+            self.calm = numpy.array(calm)
+        else:
+            disturbance = numpy.array(((self.FrameCounter > start) & (self.FrameCounter \
+                    <= stop)))
+            self.disturbance = numpy.arange(len(disturbance))[disturbance]
+            self.calm = numpy.arange(len(disturbance))[disturbance==False]
+
 
     def getAberrations(self):
         calmSlopes = numpy.average(self.Gradients[self.calm], axis=0)

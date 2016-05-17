@@ -51,17 +51,19 @@ Z2DM = pyfits.getdata('../../data/cimdatZernike2DM.fits')
 RefSlopes = Map(defaultRefSlopes, Z2S)
 DMPositions = Map(defaultActPos, Z2DM)
 
-for i in range(12):
-    for rms in numpy.linspace(-1000, 1000, 300):
-        zernikes = numpy.zeros(20)
-        if i < 2:
-            zernikes[i] = rms/50.0
-        else:
-            zernikes[i] = rms
-        RefSlopes.applyCoefficients(zernikes)
-        name = './RefSlopes/RefSlopes_Z%02d_RMS%04d.fits' % (i, rms)
-        RefSlopes.display(ax)
-        RefSlopes.save(name)
+DMPositions
+#for i in range(12):
+#    for rms in numpy.linspace(-1000, 1000, 30):
+#        zernikes = numpy.zeros(20)
+#        if i < 2:
+#            zernikes[i] = rms/50.0
+#        else:
+#            zernikes[i] = rms
+#        zernikes[2] = 361.0
+#        RefSlopes.applyCoefficients(zernikes)
+#        name = './RefSlopes/Focus_361/RefSlopes_Z%02d_RMS%04d.fits' % (i, rms)
+#        RefSlopes.display(ax)
+#        RefSlopes.save(name)
 
         
 
