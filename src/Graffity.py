@@ -743,7 +743,8 @@ class WFS ( object ):
         """
         self.derotator.setAngle(numpy.deg2rad(derotAngle))
         self.lenslet.setClockingAngle(lensletAngle)
-        self.pupil.setDecenter(pupil[0], pupil[1])
+        if pupil != None:
+            self.pupil.setDecenter(pupil[0], pupil[1])
         self.wavefront.setZern(zern)
         if actuatorPokes != None:
             self.DM.setMirror(actuatorPokes)
@@ -1038,7 +1039,7 @@ class waveFront( object ):
         self.zernikes = []
         self.nZern = nZern
         for i in numpy.arange(2, self.nZern):
-            self.zernikes.append(i, 0.0)
+            self.zernikes.append([i, 0.0])
 
         #self.tip = zernikeMode(2, 0.00)
         #self.tilt = zernikeMode(3, 0.00)
