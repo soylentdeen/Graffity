@@ -162,25 +162,64 @@ class ProcessedData ( object ):
         self.zerns_std = numpy.std(self.zerns, axis=0)
 
 class Controller( object ):
-    def __init__(self, CM = None, iTT2HO=None, TT2HO=None):
-        self.CM = pyfits.getdata(CM)
+    def __init__(self, CM = None):
+        self.CM = CM
         self.HOCM = self.CM[:60,:]
         self.TTCM = self.CM[60:,:]
-        self.iTT2HO = pyfits.getdata(iTT2HO)
-        self.TT2HO = pyfits.getdata(TT2HO)
+        self.iTT2HO = pyfits.getdata('../../data/RecnOptimiser.ITT2HO.fits',
+                ignore_missing_end=True)
+        self.TT2HO = pyfits.getdata('../../data/RecnOptimiser.TT2HO.fits',
+                ignore_missing_end=True)
+        self.SMA = pyfits.getdata('../../data/HOCtr.SMA_MATRIX.fits',
+                ignore_missing_end=True)
+        self.ModalBasis = pyfits.getdata('../../data/RecnOptimiser.ModalBasis.fits',
+                ignore_missing_end=True)
+        self.P2DM = pyfits.getdata('../../data/HOCtr.P2DM_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.iP2DM = pyfits.getdata('../../data/HOCtr.IP2DM_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.GarbageProj = pyfits.getdata('../../data/HOCtr.GARBAGE_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.KT = 0.001
+        self.KI = 0.5
 
     def computeDeltas(self, slopes):
         return self.HOCM.dot(slopes)
 
+    def computeCommands(self, slopes):
+        #HODM = self.HOCM.dot(slopes) - self.TT2HO.dot(
+        #        self.iTT2HO.dot(self.HOCM.dot(slopes)))
+        HODM = self.HOCM.dot(slopes)
+        TTM = self.TTCM.dot(slopes)
+        HODM = HODM + self.TT2HO.dot(TTM)
+
+        return HODM
+
+    def doSMA(self, command):
+        saturated = command.copy()
+        #saturated[saturated < self.
+        #print asdf
+        return command
+        
+
 class LoopAnalyzer( object):
-    def __init__(self, HOCtr=None, CB =None):
-        self.HOCtr = HOCtr
-        self.CB = CircularBuffer(CB)
+    def __init__(self, df =None):
+        self.CB = CircularBuffer(df = df)
+        self.CB.loadTemplateMaps()
+        self.HOCtr = Controller(self.CB.CM)
         self.predictions = []
 
+
     def predict(self):
+        predictions = []
         for frame, mirror in zip(self.CB.Gradients, self.CB.HODM):
-            self.predictions.append(mirror-self.HOCtr.computeDeltas(frame))
+            Pipeline = (1.0-self.HOCtr.KT)*mirror - \
+                      self.HOCtr.KI * self.HOCtr.computeCommands(frame)
+            Pipeline = Pipeline + self.CB.HO_ACT_REF_MAP
+            Pipeline = self.HOCtr.doSMA(Pipeline)
+            predictions.append(Pipeline)
+        
+        self.predictions = numpy.array(predictions)
 
 class FLIRCamImage( object ):
     def __init__(self, df):
