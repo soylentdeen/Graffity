@@ -1,6 +1,6 @@
 import numpy
 import scipy
-import pyfits
+import astropy.io.fits as pyfits
 import os
 from scipy.misc import factorial as fac
 import scipy.interpolate as interp
