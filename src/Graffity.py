@@ -12,8 +12,50 @@ from PIL import Image
 from scipy import signal
 from scipy import linalg
 
+class SubAperture( object ):
+    def __init__(self, index):
+        self.index = index
+        self.x = []
+        self.y = []
+        self.z = []
+
+    def addFluxPoint(self, tip, tilt, flux):
+        self.x.append(tip)
+        self.y.append(tilt)
+        self.z.append(flux)
+
+    def interpolate(self, tipRange=[-1, 1], tiltRange=[-1,1], spacing=0.01):
+        interpol = interp.interp2d(self.x, self.y, self.z, fill_value=0.0)
+        gridx = numpy.arange(tipRange[0], tipRange[1], spacing)
+        gridy = numpy.arange(tiltRange[0], tiltRange[1], spacing)
+
+        return interpol(gridx, gridy)
+
+
+class FOVFrame( object ):
+    def __init__(self, naps = 68):
+        self.subapertures = []
+        for i in range(naps):
+            self.subapertures.append(SubAperture(i))
+
+    def addFrame(self, tip, tilt, frame):
+        for subap, flux in zip(self.subapertures, frame):
+            subap.addFluxPoint(tip, tilt, flux)
+
+    def publish(self, ax):
+        for subap in self.subapertures:
+            postageStamp = subap.interpolate(tipRange=[-1, 1], 
+                                tiltRange=[-1, 1], spacing=0.01)
+            ax.clear()
+            ax.imshow(postageStamp)
+            ax.figure.show()
+            raw_input()
+        
+
+
 class CircularBuffer( object ):
-    def __init__(self, df='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None):
+    def __init__(self, df='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
+                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
         self.df = df
         self.directory = os.path.dirname(self.df)
         self.header = pyfits.getheader(df)
@@ -26,6 +68,8 @@ class CircularBuffer( object ):
         self.FrameCounter = self.data.field('FrameCounter')
         self.time = self.data.field('Seconds')+self.data.field('USeconds')/100000.0
         self.time -= self.time[0]
+        self.loopRate = loopRate
+        self.RTC_Delay = RTC_Delay
         if S2M != None:
             self.S2M = pyfits.getdata(S2M)
         else:
@@ -34,20 +78,47 @@ class CircularBuffer( object ):
             self.ModalBasis = pyfits.getdata(ModalBasis, ignore_missing_end=True)
         else:
             self.ModalBasis = None
+        if HOIM != None:
+            self.HOIM = pyfits.getdata(HOIM, ignore_missing_end=True)
+        else:
+            self.HOIM = None
+        if CM != None:
+            self.CM = pyfits.getdata(CM, ignore_missing_end=True)
+        else:
+            self.CM = None
+        if TT2HO != None:
+            self.TT2HO = pyfits.getdata(TT2HO, ignore_missing_end=True)
+        else:
+            self.TT2HO = None
+        if TTM2Z != None:
+            self.TTM2Z = pyfits.getdata(TTM2Z, ignore_missing_end = True)
+        else:
+            self.TTM2Z = None
         if Z2DM != None:
             self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
-            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+            if DM2Z == None:
+                self.DM2Z = linalg.pinv(self.Z2DM)
+            else:
+                self.DM2Z = pyfits.getdata(DM2Z, ignore_missing_end=True)
         else:
-            self.Z2DM = pyfits.getdata('../../data/cimdatZernike2DM.fits', 
-                    ignore_missing_end=True)
-            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+            try:
+                self.Z2DM = pyfits.getdata(os.path.dirname(os.path.realpath(__file__))+
+                         '/../data/cimdatZernikeZ2DM.fits', ignore_missing_end=True)
+                self.DM2Z = linalg.pinv(self.Z2DM)
+            except:
+                self.Z2DM = None
+                self.DM2Z = None
         if S2Z != None:
             self.S2Z = pyfits.getdata(Z2DM, ignore_missing_end=True)
-            self.Z2S = scipy.linalg.pinv(self.S2Z)
+            self.Z2S = linalg.pinv(self.S2Z)
         else:
-            self.S2Z = pyfits.getdata('../../data/Slopes2Z.fits', 
-                    ignore_missing_end=True)
-            self.Z2S = scipy.linalg.pinv(self.S2Z)
+            try:
+                self.S2Z = self.DM2Z.dot(self.CM[:60])
+                self.Z2S = linalg.pinv(self.S2Z)
+            except:
+                self.S2Z = None
+                self.Z2S = None
+        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
 
     def loadTemplateMaps(self):
         self.expno = self.header.get("HIERARCH ESO TPL EXPNO")
@@ -59,7 +130,7 @@ class CircularBuffer( object ):
                 '/RecnOptimiser.S2M_%04d.fits' % (self.expno+1))
         self.M2V = pyfits.getdata(self.directory+
                 '/RecnOptimiser.M2V_%04d.fits' % (self.expno+1))
-        self.V2M = scipy.linalg.pinv(self.M2V)
+        self.V2M = linalg.pinv(self.M2V)
         self.getDisturbanceRegions()
 
     def getDisturbanceRegions(self, start = None, stop = None):
@@ -103,6 +174,15 @@ class CircularBuffer( object ):
         self.FFT = fftpack.fftshift(fftpack.fft(self.modes))
         self.FFT = self.FFT * self.FFT.conjugate()
         self.freq = fftpack.fftshift(fftpack.fftfreq(len(self.modes[0]), 1.0/526.7))
+    
+    def processFOV(self, ax=None):
+        FOV = FOVFrame()
+        startingPoint = self.TTM[0]
+        for tt, frame in zip(self.TTM, self.Intensities):
+            if ((tt[0] != startingPoint[0]) & (tt[1] != startingPoint[1])):
+                FOV.addFrame(tt[0], tt[1], frame)
+
+        FOV.publish(ax)
 
     def extractModulation(self, ax = None):
         firstActuator = self.HODM[:,0]
@@ -128,7 +208,7 @@ class CircularBuffer( object ):
             response = []
             counter += 1
             for slope in self.Gradients[self.modulation_start+1:self.modulation_stop+1,:].T:
-                response.append(scipy.signal.correlate(slope, m, mode='valid')[0])
+                response.append(signal.correlate(slope, m, mode='valid')[0])
             IM.append(response)
         
         self.IM = numpy.array(IM)
@@ -145,6 +225,21 @@ class CircularBuffer( object ):
         self.ProcessedVoltages = ProcessedData(self.HODM, self.V2M[:,:-2]/1e-6,
                 self.DM2Z.T/1e-6)
         
+    def synchronizeData(self):
+        self.TTM = self.TTM[:-3,:]
+        self.HODM = self.HODM[:-3,:]
+        self.Gradients = self.Gradients[3:,:]
+        
+        self.TTM -= numpy.mean(self.TTM, axis=0)
+        self.HODM -= numpy.mean(self.HODM, axis=0)
+        self.Gradients -= numpy.mean(self.Gradients, axis=0)
+        
+    def zernikeSpace(self):
+        self.ZSlopes = self.Gradients.dot(self.S2Z.T)
+        self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
+        
+    def computePSD(self):
+        return None
 
 class ProcessedData ( object ):
     def __init__(self, data, modeProjection, zernikeProjection):
