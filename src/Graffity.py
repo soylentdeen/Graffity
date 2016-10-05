@@ -11,6 +11,7 @@ from scipy.ndimage import rotate
 from PIL import Image
 from scipy import signal
 from scipy import linalg
+from scipy.special import gamma
 
 class SubAperture( object ):
     def __init__(self, index):
@@ -70,6 +71,13 @@ class CircularBuffer( object ):
         self.time -= self.time[0]
         self.loopRate = loopRate
         self.RTC_Delay = RTC_Delay
+        self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
+        self.LambdaSeeing = 0.5e-6
+        self.LambdaStrehl = 2.2e-6
+        self.ReferenceSeeing = 1.0/(180.0*3600.0/numpy.pi)
+        self.L0 = numpy.inf
+        self.ApertureDiameter = 8.0
+        self.r0 = self.LambdaSeeing/self.ReferenceSeeing
         if S2M != None:
             self.S2M = pyfits.getdata(S2M)
         else:
@@ -96,6 +104,7 @@ class CircularBuffer( object ):
             self.TTM2Z = None
         if Z2DM != None:
             self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
+            self.NZernikes = self.Z2DM.shape[1]
             if DM2Z == None:
                 self.DM2Z = linalg.pinv(self.Z2DM)
             else:
@@ -238,9 +247,130 @@ class CircularBuffer( object ):
         self.ZSlopes = self.Gradients.dot(self.S2Z.T)
         self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
         
-    def computePSD(self):
-        NWindows = computeNWindows(self.ZSlopes, self.loopRate, NWindows, 
-        return None
+    def computePSD(self, source):
+        NWindows = 1
+        Resolution = 0.5
+        if source == 'ZSlopes':
+            data = self.ZSlopes
+        elif source == 'ZCommands':
+            data = self.ZCommands
+        NWindows = computeNWindows(data, self.loopRate, Resolution)
+        NSeries = data.shape[1]
+        data = FourierDetrend(data, 'TwoPoints') 
+
+        NFrames = data.shape[0]
+        Power = numpy.abs(numpy.fft.fft(data, NFrames))**2.0
+        Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+        Power = numpy.fft.fftshift(Power)
+        Freq = numpy.fft.fftshift(Freq)
+        Power = Power[Freq >= 0]
+        Freq = Freq[Freq >= 0]
+        Power = Power/2.0
+        Power = Power / numpy.mean(numpy.diff(Freq))
+        if source == 'ZSlopes':
+            self.ZPowerSlopes = Power
+            self.ZPowerFrequencies = Freq
+            self.ZPowerdFrequencies = numpy.mean(numpy.diff(self.ZPowerFrequencies))
+        elif source == 'ZCommands':
+            self.ZPowerCommands = Power
+        return
+
+    def AORejectionFunction(self):     # AORejection, WFS, RTC, NoisePropagation
+        Omega = 2*numpy.pi*self.ZPowerFrequencies
+        iOmega = (0.0 + 1.0j)*Omega
+        
+        RTC_Period = 1.0/self.loopRate
+        CycleDelay = numpy.exp(-RTC_Period*iOmega)
+        CPU_Delay = numpy.exp(-self.RTC_Delay*iOmega)
+
+        GainNumerator = numpy.array([self.controlGain])
+        GainDenominator = numpy.array([1, -1])
+        Numerator = GetTF(GainNumerator, CycleDelay)
+        Denominator = GetTF(GainDenominator, CycleDelay)
+        Controller = Numerator/Denominator
+
+
+        DM = 1
+
+        Ratio = self.RTC_Delay/RTC_Period
+        N = numpy.floor(Ratio)
+        alpha = Ratio - N
+
+        RSinPhi = -alpha*numpy.sin(Omega*RTC_Period)
+        RCosPhi = 1.0-alpha*(1.0-numpy.cos(Omega*RTC_Period))
+        Phi = numpy.arctan2(RSinPhi, RCosPhi)
+        R = numpy.sqrt(RSinPhi**2.0 + RCosPhi**2.0)
+
+        self.WFS = R*numpy.exp((0.0+1.0j)*Phi)*CycleDelay**(N+1)
+
+        self.RTC = Controller * DM
+        OpenLoop_TF = self.WFS*self.RTC
+        self.AORejection = 1.0/(1.0+OpenLoop_TF)
+        self.NoisePropagation = self.RTC*self.AORejection
+
+        self.AORejection[numpy.isnan(self.AORejection)]= 0.0
+        self.WFS[numpy.isnan(self.WFS)] = 0.0
+        self.RTC[numpy.isnan(self.RTC)] = 0.0
+        self.NoisePropagation[numpy.isnan(self.NoisePropagation)] = 0.0
+        self.AORejection = numpy.abs(self.AORejection)**2.0
+
+    def combinePSDs(self):
+        RTC2 = numpy.abs(self.RTC)**2.0
+
+        RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])])
+        self.ZPowerCommands = (RTC2S + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2)
+        self.ZPowerSlopes = self.ZPowerCommands/RTC2
+
+    def computeKolmogorovCovar(self):
+        D_L0 = self.ApertureDiameter/self.L0
+        infOuterScaleCovar, radial_orders = newKTaiaj(self.NZernikes, self.NZernikes, self.ApertureDiameter, self.r0)
+
+
+def newKTaiaj(i, j, D, r0):
+    cst = gamma(11.0/6.0)**2.0*gamma(14./3.)*(24*gamma(6.0/5.0)/5.0)**(5.0/6.0)/(2.0**(8.0/3.0)*numpy.pi)
+
+    ni, mi = FindNM(i)
+    nj, mj = FindNM(j)
+
+    print asdf
+
+
+def FindNM(mode):
+    nf = numpy.ceil(numpy.sqrt(2.0*mode+0.25)-1.5)
+
+    mf = numpy.mode - nf*(nf+1)/2.0
+    odd = numpy.mod(nf,2) == 1
+
+    mf[odd]
+
+
+
+def GetTF(Coeffs, Delay):
+    H = 0
+    for k in range(len(Coeffs)):
+        H = H + Coeffs[k]*Delay**(k-1)
+    return H
+
+def computeNWindows(data, loopRate, R):
+    N = data.shape[0]
+    dF = loopRate/(1.0*N)
+    NWindows = round(R/dF)
+    NWindows = max(1, NWindows)
+    return NWindows
+
+
+def FourierDetrend(data, detrend):
+    if detrend.lower() == 'twopoints':
+        n = data.shape[0]
+        m = numpy.ones((n,2))
+        m[:,1] = [j+1-(1+n)/2.0 for j in range(n)]
+        im = linalg.pinv(m[(0,-1),:])
+        c = im.dot(data[(0,-1),:])
+
+        data = data-m.dot(c)
+
+        return  data - numpy.mean(data)
+
 
 class ProcessedData ( object ):
     def __init__(self, data, modeProjection, zernikeProjection):

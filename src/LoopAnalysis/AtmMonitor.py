@@ -3,6 +3,9 @@ import numpy
 from matplotlib import pyplot
 import Graffity
 
+fig0 = pyplot.figure(0)
+fig0.clear()
+ax0 = fig0.add_axes([0.1, 0.1, 0.8, 0.8])
 
 CIAO_datadir = '/data/cdeen/Data/CIAO/Paranal/2016-09-23_4/DATA_LOGGER-003612/'
 CDMS_Dir = '/data/cdeen/CIAO_Commissioning/spcicfg/config/RTCDATA/CIAO/DEFAULT/'
@@ -18,3 +21,26 @@ CB = Graffity.CircularBuffer(CIAO_datadir+'CIAO_LOOP_0001.fits', S2M=CIAO_datadi
 
 CB.synchronizeData()
 CB.zernikeSpace()
+CB.computePSD(source = 'ZSlopes')
+
+"""
+ax0.plot(CB.ZPowerFrequencies, CB.ZPowerSlopes)
+ax0.set_xscale('log')
+ax0.set_yscale('log')
+fig0.show()
+raw_input()
+"""
+CB.computePSD(source = 'ZCommands')
+
+"""
+ax0.clear()
+ax0.plot(CB.ZPowerFrequencies, CB.ZPowerCommands)
+ax0.set_xscale('log')
+ax0.set_yscale('log')
+fig0.show()
+raw_input()
+"""
+
+CB.AORejectionFunction()
+CB.combinePSDs()
+CB.computeKolmogorovCovar()
