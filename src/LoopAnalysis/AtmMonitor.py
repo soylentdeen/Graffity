@@ -4,9 +4,9 @@ from matplotlib import pyplot
 import Graffity
 
 
-CIAO_datadir = '/media/cdeen/My Passport/GRAVITY/CIAO#4/2016-09-20_4/DATA_LOGGER-235016/'
-CDMS_Dir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg/config/RTCDATA/CIAO/DEFAULT/'
-CDMS4_Dir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg4/config/RTCDATA/CIAO/DEFAULT/'
+CIAO_datadir = '/data/cdeen/Data/CIAO/Paranal/2016-09-23_4/DATA_LOGGER-003612/'
+CDMS_Dir = '/data/cdeen/CIAO_Commissioning/spcicfg/config/RTCDATA/CIAO/DEFAULT/'
+CDMS4_Dir = '/data/cdeen/CIAO_Commissioning/spcicfg4/config/RTCDATA/CIAO/DEFAULT/'
 loopRate = 500 #Hz
 RTC_Delay = 0.5e-3
 

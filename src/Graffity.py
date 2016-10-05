@@ -239,6 +239,7 @@ class CircularBuffer( object ):
         self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
         
     def computePSD(self):
+        NWindows = computeNWindows(self.ZSlopes, self.loopRate, NWindows, 
         return None
 
 class ProcessedData ( object ):
