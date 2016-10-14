@@ -324,24 +324,164 @@ class CircularBuffer( object ):
     def computeKolmogorovCovar(self):
         D_L0 = self.ApertureDiameter/self.L0
         infOuterScaleCovar, radial_orders = newKTaiaj(self.NZernikes, self.NZernikes, self.ApertureDiameter, self.r0)
+        infOuterScaleCovar[:,0] = 0.0
+        infOuterScaleCovar[0,:] = 0.0
 
+        max_radial_order = numpy.int(numpy.max(radial_orders))
+
+        reduc_var = OuterScale2VarianceReduction(D_L0, max_radial_order)
+        reduction_factors = numpy.ones(radial_orders.shape)
+
+        interp = scipy.interpolate.interp1d(numpy.array(range(max_radial_order))+1, reduc_var)
+        blah = radial_orders != 0.0
+        reduction_factors[blah] = interp(radial_orders[blah])
+
+        self.KolmogorovCovar = infOuterScaleCovar * reduction_factors
+        FullVariance, n = KolmogorovVariance(self.ApertureDiameter, self.L0, self.r0, 1000)
+
+        self.FullVariance = numpy.sum(FullVariance)
+        self.FractionOfTotalVariance = numpy.real(numpy.sum(numpy.diag(self.KolmogorovCovar))/self.FullVariance)
+
+        self.OffControl = numpy.sum(numpy.diag(self.KolmogorovCovar))*(1.0/self.FractionOfTotalVariance -1.0)
+        #self.KolmogorovCovar = self.KolmogorovCovar[2:, 2:]
+
+        self.KolmogorovCovar = self.KolmogorovCovar.T * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+        self.OffControl = numpy.real(self.OffControl) * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+
+    def zernikePropagation(self):
+        self.ZernikePropagation = self.Voltage2Zernike[:60,:].T.dot(self.CM[:60,:]).dot(self.HOIM[:,:60]).T*self.Z2DM
+        self.ZernikePropagation[0][0] = 1.0
+        self.ZernikePropagation[1][1] = 1.0
+        self.ZernikePropagation[0][1] = 0.0
+        self.ZernikePropagation[1][0] = 0.0
+        self.PropagatedKolmogorovCovar = self.ZernikePropagation.dot(self.KolmogorovCovar).dot(self.ZernikePropagation.T)
+
+    def seeingEstimation(self):
+        self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
+        self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
+        self.A = self.ZPowerCommands - self.LocalNoiseFactor*self.ZPowerNoise
+
+    def noiseEvaluation():
+        FMax = numpy.max(self.ZPowerFrequencies)
+        Weights = self.AORejection * self.ZPowerFrequencies/FMax
+        Weight[ZPowerFrequencies < FMax/2.0] = 0
+        Noise = numpy.sum(Weights * self.ZPowerSlopes)/numpy.sum(Weights)
+
+        Reference = AORejection*numpy.sum(self.S2Z**2.0)/FMax
+        ReferenceNoise = numpy.sum(Weight * Reference)/numpy.sum(Weights)
+
+        self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn]))/numpy.mean(ReferenceNoise[self.ZIn])
+        self.ZPowerNoise = Reference * self.WFSNoise**2.0
+
+
+def KolmogorovVariance(D, L0, r0, nOrders):
+    cst = gamma(11./6.)*2.0*gamma(14./3.)*(24.0*gamma(6./5.)/5.)**(5./6.)/(2.**(8./3.)*numpy.pi)/gamma(17./6.)**2.
+
+    n, m, Sign = FindNM(nOrders)
+
+    y = cst * (-1)**(n-m)*(n+1.0)*gamma(n-5./6.)/gamma(n+23./6.)
+
+    reduc_var = OuterScale2VarianceReduction(D/L0,numpy.max(n))
+    reduction_factors = numpy.ones(n.shape)
+    blah = n != 0.0
+    for i in range(nOrders):
+        if blah[i]:
+            reduction_factors[i] = reduc_var[n[i]-1]
+    #reduction_factors[blah] = reduc_var[n[blah]]
+
+    y = y * reduction_factors
+    y = y * (D/r0) **(5./3.)
+    y[0] = 0
+    i = numpy.array(range(nOrders))
+    y = y[i]
+
+    return y, n
+
+    
+
+def OuterScale2VarianceReduction(D, maxrad):
+    n_rad = numpy.array(range(int(maxrad)))
+
+    x = D/2.
+    y = x**(2*n_rad-5.0/3.0)
+    w = 1
+
+    p = 0
+    facto_p = 1
+    sign_p = 1
+    reduc_var = 0
+
+    mult = gamma(n_rad-5./6.) / gamma(n_rad + 23./6.)
+    variance = 0.756 * (n_rad+1)*mult
+
+    increase = 1
+    threshold = 1e-5
+
+    while numpy.max(numpy.abs(increase)) > threshold:
+        mult = gamma(p+n_rad+1.5)*gamma(-p-n_rad+5./6.)*gamma(p+n_rad+1.0)
+        mult /= gamma(p+2*n_rad+23.0/6.0)/gamma(p+17./6.)
+        increase = increase + sign_p /facto_p*w*mult
+
+        reduc_var = reduc_var + increase
+        increase = increase / reduc_var
+        y = y*x**2.0
+        w = w*x**2.0
+        p = p+1
+        facto_p = facto_p*p
+        sign_p = -sign_p
+
+    return reduc_var
 
 def newKTaiaj(i, j, D, r0):
     cst = gamma(11.0/6.0)**2.0*gamma(14./3.)*(24*gamma(6.0/5.0)/5.0)**(5.0/6.0)/(2.0**(8.0/3.0)*numpy.pi)
 
-    ni, mi = FindNM(i)
-    nj, mj = FindNM(j)
+    ni, mi, Sign = FindNM(i)
+    nj, mj, Sign = FindNM(j)
 
-    print asdf
+    NI = []
+    MI = []
+    NJ = []
+    MJ = []
+    I = []
+    J = []
+    for x in range(j):
+        NI.append(ni)
+        MI.append(mi)
+        NJ.append(nj)
+        MJ.append(mj)
+        I.append(numpy.array(range(i)) + 1.0)
+        J.append(numpy.array(range(j)) + 1.0)
 
+    ni = numpy.array(NI)
+    mi = numpy.array(MI)
+    nj = numpy.array(NJ).T
+    mj = numpy.array(MJ).T
+    i = numpy.array(I)
+    j = numpy.array(J).T
 
-def FindNM(mode):
+    n = numpy.sqrt(ni*nj)
+    y = cst *(-1.0+0j)**((ni+nj-2*mi)/2.0)*numpy.sqrt((ni+1)*(nj+1))*gamma((ni+nj-5./3.)/2.) / (gamma((ni-nj+17./3.)/2.0) * gamma((nj-ni+17.0/3.0)/2.0) *
+              gamma((ni+nj+23./3.0)/2.0))
+    y[mi!=mj] = 0.0
+    blah = numpy.remainder(numpy.abs(i-j),2)==1
+    junk = mi !=0
+    y *= 1.0*(blah ^ junk)
+    y = y * (D/r0)**(5.0/3.0)
+
+    return y, n
+
+def FindNM(i):
+    mode = numpy.array(range(i))+1.0
     nf = numpy.ceil(numpy.sqrt(2.0*mode+0.25)-1.5)
 
-    mf = numpy.mode - nf*(nf+1)/2.0
+    mf = mode - nf*(nf+1)/2.0
     odd = numpy.mod(nf,2) == 1
 
-    mf[odd]
+    mf[odd] = 2*numpy.floor((mf[odd]+1)/2) -1
+    mf[odd==False] = 2*numpy.floor(mf[odd==False]/2)
+    Sign = numpy.mod(mode - (nf-1)*nf/2,2)
+
+    return nf, mf, Sign
 
 
 
