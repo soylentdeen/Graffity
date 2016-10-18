@@ -105,6 +105,7 @@ class CircularBuffer( object ):
         if Z2DM != None:
             self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
             self.NZernikes = self.Z2DM.shape[1]
+            self.ZIn = numpy.array([(i >= 4) & (i < 99) for i in range(self.NZernikes)])
             if DM2Z == None:
                 self.DM2Z = linalg.pinv(self.Z2DM)
             else:
@@ -259,20 +260,36 @@ class CircularBuffer( object ):
         data = FourierDetrend(data, 'TwoPoints') 
 
         NFrames = data.shape[0]
-        Power = numpy.abs(numpy.fft.fft(data, NFrames))**2.0
+        Power = numpy.abs(numpy.fft.fft(data/NFrames))**2.0
         Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
         Power = numpy.fft.fftshift(Power)
         Freq = numpy.fft.fftshift(Freq)
-        Power = Power[Freq >= 0]
+        Power = 2.0*Power[Freq >= 0]
         Freq = Freq[Freq >= 0]
-        Power = Power/2.0
+        Power[0,:] /= 2.0
         Power = Power / numpy.mean(numpy.diff(Freq))
+        print asdf
+
+        NSamplesPerWindow = numpy.floor(Power.shape[0]/NWindows)
+        TotalSampleNumber = NWindows * NSamplesPerWindow
+
+        if NWindows > 1:
+            Power = Power[:TotalSampleNumber,:]
+            Power = Power.reshape([NWindows, NSamplesPerWindow, NSeries])
+            Power = numpy.mean(Power, axis=0)
+            #Power.reshape([ower.shape[-2:], 1])
+
+            Freq = Freq[:TotalSampleNumber]
+            Freq.reshape([NWindows, NSamplesPerWindow])
+            print asdf
+
         if source == 'ZSlopes':
             self.ZPowerSlopes = Power
             self.ZPowerFrequencies = Freq
             self.ZPowerdFrequencies = numpy.mean(numpy.diff(self.ZPowerFrequencies))
         elif source == 'ZCommands':
             self.ZPowerCommands = Power
+        print asdf
         return
 
     def AORejectionFunction(self):     # AORejection, WFS, RTC, NoisePropagation
@@ -313,6 +330,9 @@ class CircularBuffer( object ):
         self.RTC[numpy.isnan(self.RTC)] = 0.0
         self.NoisePropagation[numpy.isnan(self.NoisePropagation)] = 0.0
         self.AORejection = numpy.abs(self.AORejection)**2.0
+        print asdf
+
+    #def measureVibrations(self)
 
     def combinePSDs(self):
         RTC2 = numpy.abs(self.RTC)**2.0
@@ -320,6 +340,7 @@ class CircularBuffer( object ):
         RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])])
         self.ZPowerCommands = (RTC2S + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2)
         self.ZPowerSlopes = self.ZPowerCommands/RTC2
+        
 
     def computeKolmogorovCovar(self):
         D_L0 = self.ApertureDiameter/self.L0
@@ -361,14 +382,14 @@ class CircularBuffer( object ):
         self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
         self.A = self.ZPowerCommands - self.LocalNoiseFactor*self.ZPowerNoise
 
-    def noiseEvaluation():
+    def noiseEvaluation(self):
         FMax = numpy.max(self.ZPowerFrequencies)
         Weights = self.AORejection * self.ZPowerFrequencies/FMax
-        Weight[ZPowerFrequencies < FMax/2.0] = 0
+        Weights[self.ZPowerFrequencies < FMax/2.0] = 0
         Noise = numpy.sum(Weights * self.ZPowerSlopes)/numpy.sum(Weights)
 
-        Reference = AORejection*numpy.sum(self.S2Z**2.0)/FMax
-        ReferenceNoise = numpy.sum(Weight * Reference)/numpy.sum(Weights)
+        Reference = self.AORejection*numpy.sum(self.S2Z**2.0)/FMax
+        ReferenceNoise = numpy.sum(Weights * Reference)/numpy.sum(Weights)
 
         self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn]))/numpy.mean(ReferenceNoise[self.ZIn])
         self.ZPowerNoise = Reference * self.WFSNoise**2.0
@@ -488,7 +509,7 @@ def FindNM(i):
 def GetTF(Coeffs, Delay):
     H = 0
     for k in range(len(Coeffs)):
-        H = H + Coeffs[k]*Delay**(k-1)
+        H = H + Coeffs[k]*Delay**(k)
     return H
 
 def computeNWindows(data, loopRate, R):
