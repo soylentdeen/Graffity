@@ -90,14 +90,16 @@ class CircularBuffer( object ):
             self.HOIM = pyfits.getdata(HOIM, ignore_missing_end=True)
         else:
             self.HOIM = None
-        if CM != None:
-            self.CM = pyfits.getdata(CM, ignore_missing_end=True)
-        else:
-            self.CM = None
         if TT2HO != None:
             self.TT2HO = pyfits.getdata(TT2HO, ignore_missing_end=True)
         else:
             self.TT2HO = None
+        if CM != None:
+            self.CM = pyfits.getdata(CM, ignore_missing_end=True)
+            self.CM /= self.controlGain
+            self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
+        else:
+            self.CM = None
         if TTM2Z != None:
             self.TTM2Z = pyfits.getdata(TTM2Z, ignore_missing_end = True)
         else:
@@ -249,6 +251,9 @@ class CircularBuffer( object ):
         self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
         
     def computePSD(self, source):
+        fig = pyplot.figure(0)
+        ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+        ax.clear()
         NWindows = 1
         Resolution = 0.5
         if source == 'ZSlopes':
@@ -260,36 +265,39 @@ class CircularBuffer( object ):
         data = FourierDetrend(data, 'TwoPoints') 
 
         NFrames = data.shape[0]
-        Power = numpy.abs(numpy.fft.fft(data/NFrames))**2.0
+        Power = numpy.abs(numpy.fft.fft(data.T/NFrames))**2.0
+        print asdf
         Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+
         Power = numpy.fft.fftshift(Power)
         Freq = numpy.fft.fftshift(Freq)
-        Power = 2.0*Power[Freq >= 0]
+        Power = 2.0*Power[:,Freq >= 0]
         Freq = Freq[Freq >= 0]
-        Power[0,:] /= 2.0
+        Power[:,0] /= 2.0
         Power = Power / numpy.mean(numpy.diff(Freq))
-        print asdf
 
-        NSamplesPerWindow = numpy.floor(Power.shape[0]/NWindows)
+        NSamplesPerWindow = numpy.floor(Power.shape[1]/NWindows)
         TotalSampleNumber = NWindows * NSamplesPerWindow
 
         if NWindows > 1:
-            Power = Power[:TotalSampleNumber,:]
+            Power = Power[:,:TotalSampleNumber]
             Power = Power.reshape([NWindows, NSamplesPerWindow, NSeries])
+            print asdf
             Power = numpy.mean(Power, axis=0)
-            #Power.reshape([ower.shape[-2:], 1])
 
             Freq = Freq[:TotalSampleNumber]
-            Freq.reshape([NWindows, NSamplesPerWindow])
-            print asdf
+            Freq = Freq.reshape([NWindows, NSamplesPerWindow], order = 'F')
+            Freq = numpy.mean(Freq, axis = 0)
 
         if source == 'ZSlopes':
             self.ZPowerSlopes = Power
             self.ZPowerFrequencies = Freq
             self.ZPowerdFrequencies = numpy.mean(numpy.diff(self.ZPowerFrequencies))
+            ax.plot(Freq, Power)
+            fig.show()
+            print asdf
         elif source == 'ZCommands':
             self.ZPowerCommands = Power
-        print asdf
         return
 
     def AORejectionFunction(self):     # AORejection, WFS, RTC, NoisePropagation
@@ -330,14 +338,14 @@ class CircularBuffer( object ):
         self.RTC[numpy.isnan(self.RTC)] = 0.0
         self.NoisePropagation[numpy.isnan(self.NoisePropagation)] = 0.0
         self.AORejection = numpy.abs(self.AORejection)**2.0
-        print asdf
 
     #def measureVibrations(self)
 
     def combinePSDs(self):
         RTC2 = numpy.abs(self.RTC)**2.0
 
-        RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])])
+        RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[n,:] for n in range(self.ZPowerSlopes.shape[0])])
+        print asdf
         self.ZPowerCommands = (RTC2S + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2)
         self.ZPowerSlopes = self.ZPowerCommands/RTC2
         
@@ -386,7 +394,7 @@ class CircularBuffer( object ):
         FMax = numpy.max(self.ZPowerFrequencies)
         Weights = self.AORejection * self.ZPowerFrequencies/FMax
         Weights[self.ZPowerFrequencies < FMax/2.0] = 0
-        Noise = numpy.sum(Weights * self.ZPowerSlopes)/numpy.sum(Weights)
+        Noise = numpy.sum(Weights * self.ZPowerSlopes, axis=1)/numpy.sum(Weights)
 
         Reference = self.AORejection*numpy.sum(self.S2Z**2.0)/FMax
         ReferenceNoise = numpy.sum(Weights * Reference)/numpy.sum(Weights)
@@ -530,7 +538,7 @@ def FourierDetrend(data, detrend):
 
         data = data-m.dot(c)
 
-        return  data - numpy.mean(data)
+        return  data - numpy.mean(data, axis=0)
 
 
 class ProcessedData ( object ):
