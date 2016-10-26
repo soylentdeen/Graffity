@@ -47,3 +47,10 @@ CB.computeKolmogorovCovar()
 CB.zernikePropagation()
 CB.noiseEvaluation()
 CB.seeingEstimation()
+CB.computeSpectralSlope((3,15))
+CB.estimateStrehlRatio()
+
+
+print("Seeing : %.3f" % (CB.Seeing*CB.Arcsec))
+print("Strehl : %.3f" % CB.Strehl)
+print("Tau0   : %.4f" % CB.Tau0)
