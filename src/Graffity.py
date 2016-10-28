@@ -13,6 +13,83 @@ from scipy import signal
 from scipy import linalg
 from scipy.special import gamma
 
+class PSF( object ):
+    def __init__(self, sizeInPix=20, lam=2.0, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
+        self.sizeInPix = sizeInPix
+        self.lam = lam*1.0e-6
+        self.dlam = dlam*1.0e-6
+        self.pscale = pscale * 2.0 *numpy.pi/360.0/60.0**2.0/1.0e3
+        self.M1 = M1
+        self.M2 = M2
+        self.nLambdaSteps = nLambdaSteps
+        self.fmax = self.M1 * self.pscale * self.sizeInPix/self.lam
+
+    def Sinc(self, x):
+        if numpy.abs(x) < 1e-4:
+            return 1.0
+        else:
+            return numpy.sin(x)/x
+
+    def H1(self, f, u, v):
+        if numpy.abs(1.0-v) < 1e-12:
+            e = 1
+        else:
+            e = -1
+        return v**2.0/numpy.pi *numpy.arccos((f/v) * (1.0+e*(1.0-u**2.0)/(4*f**2.0)))
+
+    def H2(self, f, u):
+        a = 2.0*f/(1.0+u)
+        b = (1.0-u)/(2.0*f)
+        return -1.0*(f/numpy.pi)*(1.0+u)*numpy.sqrt((1.0-a**2.0)*(1.0-b**2.0))
+
+    def G(self, f, u):
+        if f <= (1.0 - u)/2.0:
+            return u**2.0
+        elif f >= (1.0 + u)/2.0:
+            return 0.0
+        else:
+            return self.H1(f, u, 1.0) + self.H1(f, u, u) + self.H2(f, u)
+
+    def TelOTF(self, f, u):
+        retval = (self.G(f, 1.0) + u**2.0*self.G(f/u, 1) - 2*self.G(f, u))/(1.0 - u**2.0)
+        return retval
+
+    def generateOTF(self):
+        total = numpy.zeros([self.sizeInPix, self.sizeInPix])
+        for k in numpy.arange(self.nLambdaSteps):
+            l = self.lam - self.dlam*(k - self.nLambdaSteps/2.0)/(self.nLambdaSteps - 1)
+            fc = self.fmax*self.lam/l
+
+            for i in range(self.sizeInPix):
+                for j in range(self.sizeInPix):
+                    y = j - self.sizeInPix/2.0 + 0.5
+                    x = i - self.sizeInPix/2.0 + 0.5
+                    r = numpy.sqrt(x**2.0 + y**2.0)
+                    f = r/fc
+                    if f < 1:
+                        if r < 0.1:
+                            total[i, j] += 1.0/nLambdaSteps
+                        else:
+                            total[i, j] += (self.TelOTF(f, self.M2/self.M1)*self.Sinc(numpy.pi*x/self.sizeInPix)
+                                                       *self.Sinc(numpy.pi*y/self.sizeInPix))/self.nLambdaSteps
+                    else:
+                        total[i, j] += 0.0
+        self.OTF = total
+        self.PSF = numpy.fft.fftshift(numpy.abs(numpy.fft.fft2(self.OTF)))
+        self.PSF = self.normalize(self.PSF)
+
+    def getPSF(self):
+        return self.PSF
+
+    def normalize(self, image):
+        return image/numpy.max(image)
+
+    def calcStrehl(self, cutout):
+        factor = numpy.sum(self.PSF) / numpy.sum(cutout)
+        return numpy.max(cutout)*factor
+        
+
+
 class SubAperture( object ):
     def __init__(self, index):
         self.index = index
