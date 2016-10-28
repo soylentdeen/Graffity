@@ -2,13 +2,13 @@ import scipy
 import numpy
 from matplotlib import pyplot
 
-def generateOTF(sizeInPix = 20, lam = 2.0, dlam = 0.03, pscale = 17.0, M1=8.0, M2=1.3, nLambdaSteps = 9):
+def generateOTF(sizeInPix = 20, lam = 2.0, dlam = 0.03, pscale = 70.0, M1=8.0, M2=1.3, nLambdaSteps = 9):
     lam = lam*1.0e-6
     dlam = dlam*1.0e-6
     pscale = pscale * 2.0 * numpy.pi/360.0/60.0**2.0/10.0**3
     fmax = M1 * pscale * sizeInPix / lam
 
-    total = numpy.zeros([sizeInPix, sizeInPix])
+    total = numpy.zeros([sizeInPix, sizeInPix], dtype=numpy.complex)
     for k in numpy.arange(nLambdaSteps):
         l = lam - dlam*(k-nLambdaSteps/2.0)/nLambdaSteps
         fc = fmax*lam/l
@@ -22,15 +22,15 @@ def generateOTF(sizeInPix = 20, lam = 2.0, dlam = 0.03, pscale = 17.0, M1=8.0, M
                 f = r/fc
                 if f < 1:
                     if r < 0.1:
-                        total[i,j] += 1.0/nLambdaSteps
+                        total[i,j] += numpy.complex(1.0/nLambdaSteps, 0.0)
                     else:
-                        total[i,j] += (TelOTF(f, M2/M1)*Sinc(numpy.pi*x/sizeInPix)*Sinc(numpy.pi*y/sizeInPix))/nLambdaSteps
+                        total[i,j] += numpy.complex((TelOTF(f, M2/M1)*Sinc(numpy.pi*x/sizeInPix)*Sinc(numpy.pi*y/sizeInPix))/nLambdaSteps, 0.0)
                 else:
-                    total[i,j] += 0.0
-    retval = numpy.fft.ifft2(total)
-    retval = numpy.fft.fftshift(retval)
-    retval = numpy.real(retval*retval.conj())
-    #retval = total
+                    total[i,j] += numpy.complex(0.0, 0.0)
+    retval = numpy.fft.fft2(total)
+    retval = numpy.fft.fftshift((retval*retval.conjugate()).real)
+    #retval = numpy.real(retval*retval.conj())
+    retval = (total*total.conjugate()).real
     return retval
 
 def Sinc(x):
