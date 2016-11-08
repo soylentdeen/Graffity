@@ -12,6 +12,8 @@ from PIL import Image
 from scipy import signal
 from scipy import linalg
 from scipy.special import gamma
+from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=2.0, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
@@ -794,6 +796,39 @@ class LoopAnalyzer( object):
             predictions.append(Pipeline)
         
         self.predictions = numpy.array(predictions)
+
+class AcqCamImage( object ):
+    def __init__(self, df=''):
+        self.df = df
+        self.imageCube = pyfits.getdata(df)
+        self.mean = numpy.mean(self.imageCube)
+        self.std = numpy.std(self.imageCube)
+
+
+    def findPeaks(self, size=4):
+        neighborhood = generate_binary_structure(2, 2)
+        local_max = maximum_filter(self.imageCube, size=size)==self.imageCube
+
+        background = (self.imageCube==0)
+
+        erodedBackground = binary_erosion(background, structure=neighborhood, border_value = 1)
+
+        detectedPeaks = local_max - erodedBackground
+        self.local_max = local_max
+
+        coordx, coordy = numpy.meshgrid(numpy.arange(self.imageCube.shape[0]), numpy.arange(self.imageCube.shape[1]))
+        self.x = coordx[self.local_max]
+        self.y = coordy[self.local_max]
+
+    def stack(self):
+        self.postageStamp = []
+        for x, y in zip(self.x, self.y):
+            if (self.imageCube[y,x] > self.mean+2.0*self.std) & (10 < x <240) & (10 < y < 240):
+                self.postageStamp.append(self.imageCube[y-10:y+10, x-10:x+10])
+                self.postageStamp[-1] /= numpy.max(self.postageStamp)
+
+        self.postageStamp = numpy.median(numpy.array(self.postageStamp), axis=0)
+
 
 class FLIRCamImage( object ):
     def __init__(self, df):
