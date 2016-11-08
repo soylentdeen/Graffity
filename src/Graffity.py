@@ -459,7 +459,7 @@ class CircularBuffer( object ):
         self.ZernikePropagation[1][0] = 0.0
         self.PropagatedKolmogorovCovar = self.ZernikePropagation.dot(self.KolmogorovCovar).dot(self.ZernikePropagation.T)
 
-    def seeingEstimation(self):
+    def seeingEstimation(self, ax=None):
         self.Arcsec = 180.0*3600.0/numpy.pi
         self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
         self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
@@ -536,16 +536,19 @@ class CircularBuffer( object ):
         IHigh = ComputeIntegral(dFModel, F, High)
 
         interp = scipy.interpolate.interp1d([ILow, IHigh], [Low, High])
-        self.Tau0 = numpy.real(interp(TargetIntegral)).tolist()
+        self.Tau0 = interp(numpy.real(TargetIntegral)).tolist()
 
         return 
 
-    def estimateStrehlRatio(self):
+    def estimateStrehlRatio(self, ax=None):
+        #print 'OffControl: %E, Seeing Scale: %E' % (self.OffControl, self.SeeingScale)
         self.OffControl = 1.0 * self.OffControl * self.SeeingScale
+        #print 'OffControl: %E' % self.OffControl
         self.ScaledKolmogorovCovar = self.KolmogorovCovar * self.SeeingScale
         self.PropagatedKolmogorovCovar *= self.SeeingScale
         self.UnPropagated = (self.ScaledKolmogorovCovar - self.PropagatedKolmogorovCovar).diagonal()
-        self.OffControl += numpy.sum(self.UnPropagated)
+        self.OffControl += numpy.abs(numpy.sum(self.UnPropagated))
+        #print 'UnPropagated: %E' % numpy.sum(self.UnPropagated)
 
         self.ZPowerWFS = self.ZPowerSlopes.T - self.ZPowerNoise
         self.ZPowerWFS = numpy.array([self.ZPowerWFS[n,:]/(numpy.abs(self.WFS)**2.0)[n] for n in range(self.ZPowerWFS.shape[0])])
@@ -556,7 +559,12 @@ class CircularBuffer( object ):
         self.WFSError = numpy.sqrt(numpy.max([0.0, self.WFS2]))
         self.Strehl = numpy.real(numpy.exp(-(2.0*numpy.pi*self.WFE/self.LambdaStrehl)**2.0))
         self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
-
+        if ax != None:
+            print 'OffControl: %E' % self.OffControl
+            print 'WFE: %E' % self.WFE
+            print 'WFSError: %E' % self.WFSError
+            print 'Strehl: %f' % self.Strehl
+            raw_input()
 
     def noiseEvaluation(self):
         FMax = numpy.max(self.ZPowerFrequencies)

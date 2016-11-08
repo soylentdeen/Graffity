@@ -7,9 +7,9 @@ fig0 = pyplot.figure(0)
 fig0.clear()
 ax0 = fig0.add_axes([0.1, 0.1, 0.8, 0.8])
 
-CIAO_datadir = '/data/cdeen/Data/CIAO/Paranal/2016-09-23_4/DATA_LOGGER-003612/'
-CDMS_Dir = '/data/cdeen/CIAO_Commissioning/spcicfg/config/RTCDATA/CIAO/DEFAULT/'
-CDMS4_Dir = '/data/cdeen/CIAO_Commissioning/spcicfg4/config/RTCDATA/CIAO/DEFAULT/'
+CIAO_datadir = '/home/cdeen/Data/CIAO/2016-09-21/CIAO1/DATA_LOGGER-000038/'
+CDMS_Dir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg/config/RTCDATA/CIAO/DEFAULT/'
+CDMS4_Dir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg4/config/RTCDATA/CIAO/DEFAULT/'
 loopRate = 500 #Hz
 RTC_Delay = 0.5e-3
 
