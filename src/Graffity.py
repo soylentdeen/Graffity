@@ -16,7 +16,7 @@ from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 
 class PSF( object ):
-    def __init__(self, sizeInPix=20, lam=2.0, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
+    def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
         self.sizeInPix = sizeInPix
         self.lam = lam*1.0e-6
         self.dlam = dlam*1.0e-6
@@ -134,9 +134,11 @@ class FOVFrame( object ):
 
 
 class CircularBuffer( object ):
-    def __init__(self, df='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
+    def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
                  DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
         self.df = df
+        self.CDMS_BaseDir = CDMS_BaseDir
+        self.CDMS_ConfigDir = CDMS_ConfigDir
         self.directory = os.path.dirname(self.df)
         self.header = pyfits.getheader(df)
         self.data = pyfits.getdata(df)
@@ -157,12 +159,14 @@ class CircularBuffer( object ):
         self.L0 = numpy.inf
         self.ApertureDiameter = 8.0
         self.r0 = self.LambdaSeeing/self.ReferenceSeeing
+        self.CIAO_ID = self.header.get("ESO OCS SYS ID")
         if S2M != None:
             self.S2M = pyfits.getdata(S2M)
         else:
             self.S2M = None
         if ModalBasis != None:
-            self.ModalBasis = pyfits.getdata(ModalBasis, ignore_missing_end=True)
+            self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                ModalBasis, ignore_missing_end=True)
         else:
             self.ModalBasis = None
         if HOIM != None:
@@ -170,7 +174,8 @@ class CircularBuffer( object ):
         else:
             self.HOIM = None
         if TT2HO != None:
-            self.TT2HO = pyfits.getdata(TT2HO, ignore_missing_end=True)
+            self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+TT2HO, 
+                                        ignore_missing_end=True)
         else:
             self.TT2HO = None
         if CM != None:
@@ -180,20 +185,24 @@ class CircularBuffer( object ):
         else:
             self.CM = None
         if TTM2Z != None:
-            self.TTM2Z = pyfits.getdata(TTM2Z, ignore_missing_end = True)
+            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+TTM2Z,
+                                        ignore_missing_end = True)
         else:
             self.TTM2Z = None
         if Z2DM != None:
-            self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
+            self.Z2DM = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+Z2DM,
+                                       ignore_missing_end=True)
             self.NZernikes = self.Z2DM.shape[1]
             self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(self.NZernikes)])
             if DM2Z == None:
                 self.DM2Z = linalg.pinv(self.Z2DM)
             else:
-                self.DM2Z = pyfits.getdata(DM2Z, ignore_missing_end=True)
+                self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+DM2Z,
+                                           ignore_missing_end=True)
         else:
             if DM2Z != None:
-                self.DM2Z = pyfits.getdata(DM2Z, ignore_missing_end=True)
+                self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+DM2Z, 
+                                           ignore_missing_end=True)
                 self.Z2DM = linalg.pinv(self.DM2Z)
             try:
                 self.Z2DM = pyfits.getdata(os.path.dirname(os.path.realpath(__file__))+
@@ -321,6 +330,7 @@ class CircularBuffer( object ):
         
     def synchronizeData(self):
         self.TTM = self.TTM[:-3,:]
+        #self.TTM = self.TTM[2:-1,:]
         self.HODM = self.HODM[2:-1,:]
         self.Gradients = self.Gradients[3:,:]
         
@@ -465,11 +475,11 @@ class CircularBuffer( object ):
         self.Arcsec = 180.0*3600.0/numpy.pi
         self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
         self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
-        self.A = self.ZPowerCommands.T - numpy.array([self.ZPowerNoise[n,:] * self.LocalNoiseFactor[n] for n 
+        self.A=self.ZPowerCommands.T-numpy.array([self.ZPowerNoise[n,:] * self.LocalNoiseFactor[n] for n 
                      in range(self.LocalNoiseFactor.shape[0])])
-        self.ZPowerAtmosphere = numpy.array([self.A[n,:] * self.LocalAtmosphereFactor[n] for n
+        self.ZPowerAtmosphere = numpy.array([self.A[n,:]*self.LocalAtmosphereFactor[n] for n
                      in range(self.A.shape[0])])
-        AtmosphereTotalPower = self.ZPowerdFrequencies * numpy.sum(self.ZPowerAtmosphere[:,self.ZIn])
+        AtmosphereTotalPower = self.ZPowerdFrequencies*numpy.sum(self.ZPowerAtmosphere[:,self.ZIn])
         K = numpy.sum(numpy.array(self.PropagatedKolmogorovCovar.diagonal())[self.ZIn])
         self.SeeingScale = AtmosphereTotalPower/K
         self.Seeing = numpy.real(self.SeeingScale**(3.0/5.0)/self.Arcsec)
@@ -543,14 +553,11 @@ class CircularBuffer( object ):
         return 
 
     def estimateStrehlRatio(self, ax=None):
-        #print 'OffControl: %E, Seeing Scale: %E' % (self.OffControl, self.SeeingScale)
         self.OffControl = 1.0 * self.OffControl * self.SeeingScale
-        #print 'OffControl: %E' % self.OffControl
         self.ScaledKolmogorovCovar = self.KolmogorovCovar * self.SeeingScale
         self.PropagatedKolmogorovCovar *= self.SeeingScale
         self.UnPropagated = (self.ScaledKolmogorovCovar - self.PropagatedKolmogorovCovar).diagonal()
-        self.OffControl += numpy.abs(numpy.sum(self.UnPropagated))
-        #print 'UnPropagated: %E' % numpy.sum(self.UnPropagated)
+        self.OffControl += numpy.sum(self.UnPropagated) 
 
         self.ZPowerWFS = self.ZPowerSlopes.T - self.ZPowerNoise
         self.ZPowerWFS = numpy.array([self.ZPowerWFS[n,:]/(numpy.abs(self.WFS)**2.0)[n] for n in range(self.ZPowerWFS.shape[0])])
@@ -561,6 +568,7 @@ class CircularBuffer( object ):
         self.WFSError = numpy.sqrt(numpy.max([0.0, self.WFS2]))
         self.Strehl = numpy.real(numpy.exp(-(2.0*numpy.pi*self.WFE/self.LambdaStrehl)**2.0))
         self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
+        self.rms = numpy.mean(numpy.std(self.Gradients))
         if ax != None:
             print 'OffControl: %E' % self.OffControl
             print 'WFE: %E' % self.WFE
@@ -806,36 +814,101 @@ class LoopAnalyzer( object):
         self.predictions = numpy.array(predictions)
 
 class AcqCamImage( object ):
-    def __init__(self, df=''):
+    def __init__(self, datadir='', df=''):
+        self.datadir = datadir
         self.df = df
-        self.imageCube = pyfits.getdata(df)
-        self.mean = numpy.mean(self.imageCube)
-        self.std = numpy.std(self.imageCube)
+        self.imageCube = pyfits.getdata(self.datadir+self.df)
+        self.sky = pyfits.getdata(self.datadir+'sky.fits')
+        self.dead = pyfits.getdata(self.datadir+'dead.fits')
 
+        self.x = numpy.array([1565, 1130, 660, 150])
+        self.y = numpy.array([130, 120, 125, 125])
+        self.width = 250
+        self.clean()
+        #self.mean = numpy.mean(self.imageCube)
+        #self.std = numpy.std(self.imageCube)
+
+    def clean(self):
+        self.cleanSky = {}
+        for ut in range(4):
+            cleaned = numpy.zeros(self.sky.shape)
+            for x in numpy.arange(self.x[ut], self.x[ut]+self.width):
+                for y in numpy.arange(self.y[ut], self.y[ut]+self.width):
+                    if self.dead[y][x] == 1:
+                        r = 1
+                        while True:
+                            region = self.dead[y-(r+1):y+r, x-(r+1):x+r]
+                            if numpy.sum(region) - region.shape[0]*region.shape[1] < -3.0:
+                                break
+                            else:
+                                r += 1
+                        cleaned[y][x] = numpy.median(self.sky[y-(r+1):y+r, x-(r+1):x+r][self.dead[y-(r+1):y+r,x-(r+1):x+r]==0])
+                    else:
+                        cleaned[y][x] = self.sky[y][x]
+            self.cleanSky[ut] = cleaned[self.y[ut]:self.y[ut]+self.width, self.x[ut]:self.x[ut]+self.width].copy()
+        #"""
+        self.clean = {}
+        self.mean = {}
+        self.std = {}
+        for ut in range(4):
+            print ut
+            cleaned = []
+            mean = []
+            std = []
+            for frame in self.imageCube:
+                for x in numpy.arange(self.x[ut], self.x[ut]+self.width):
+                    for y in numpy.arange(self.y[ut], self.y[ut]+self.width):
+                        if self.dead[y][x] == 1:
+                            r = 1
+                            while True:
+                                region = self.dead[y-(r+1):y+r, x-(r+1):x+r]
+                                if numpy.sum(region) - region.shape[0]*region.shape[1] < -3.0:
+                                    break
+                                else:
+                                    r += 1
+                            frame[y][x] = numpy.median(frame[y-(r+1):y+r,x-(r+1):x+r][self.dead[y-(r+1):y+r, x-(r+1):x+r]==0])
+                cleaned.append(frame[self.y[ut]:self.y[ut]+self.width, self.x[ut]:self.x[ut]+self.width]- self.cleanSky[ut])
+                mean.append(numpy.mean(cleaned[-1]))
+                std.append(numpy.std(cleaned[-1]))
+
+            self.clean[ut] = numpy.array(cleaned)
+            self.mean[ut] = numpy.array(mean)
+            self.std[ut] = numpy.array(std)
+        #"""
 
     def findPeaks(self, size=4):
         neighborhood = generate_binary_structure(2, 2)
-        local_max = maximum_filter(self.imageCube, size=size)==self.imageCube
-
-        background = (self.imageCube==0)
-
-        erodedBackground = binary_erosion(background, structure=neighborhood, border_value = 1)
-
-        detectedPeaks = local_max - erodedBackground
-        self.local_max = local_max
-
-        coordx, coordy = numpy.meshgrid(numpy.arange(self.imageCube.shape[0]), numpy.arange(self.imageCube.shape[1]))
-        self.x = coordx[self.local_max]
-        self.y = coordy[self.local_max]
+        self.x = {}
+        self.y = {}
+        for ut in range(4):
+            for frame in self.clean[ut]:
+                local_max = maximum_filter(frame, size=size)==frame
+                coordx, coordy =numpy.meshgrid(numpy.arange(frame.shape[0]),numpy.arange(frame.shape[1]))
+            self.x[ut] = coordx[local_max]
+            self.y[ut] = coordy[local_max]
 
     def stack(self):
-        self.postageStamp = []
-        for x, y in zip(self.x, self.y):
-            if (self.imageCube[y,x] > self.mean+2.0*self.std) & (10 < x <240) & (10 < y < 240):
-                self.postageStamp.append(self.imageCube[y-10:y+10, x-10:x+10])
-                self.postageStamp[-1] /= numpy.max(self.postageStamp)
+        self.postageStamps = {}
+        self.speckleStamps = {}
+        for ut in range(4):
+            postageStamp = []
+            speckleStamp = []
+            for frame, mean, std in zip(self.clean[ut], self.mean[ut], self.std[ut]):
+                PS = []
+                goodX = []
+                goodY = []
+                for x, y in zip(self.x[ut], self.y[ut]):
+                    if (frame[y,x] > mean+2.0*std) & (10 < x <240) & (10 < y < 240):
+                        PS.append(frame[y-10:y+10, x-10:x+10])
+                        PS[-1] /= numpy.max(PS[-1])
+                        goodX.append(x)
+                        goodY.append(y)
 
-        self.postageStamp = numpy.median(numpy.array(self.postageStamp), axis=0)
+                #self.x[
+                postageStamp.append(numpy.median(numpy.array(PS), axis=0))
+                speckleStamp.append(numpy.array(PS))
+            self.postageStamps[ut] = numpy.array(postageStamp)
+            self.speckleStamps[ut] = numpy.array(speckleStamp)
 
 
 class FLIRCamImage( object ):
