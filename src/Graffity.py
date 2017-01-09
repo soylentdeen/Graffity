@@ -11,6 +11,127 @@ from scipy.ndimage import rotate
 from PIL import Image
 from scipy import signal
 from scipy import linalg
+from scipy.special import gamma
+from scipy.ndimage.filters import maximum_filter
+from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
+
+class PSF( object ):
+    def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
+        self.sizeInPix = sizeInPix
+        self.lam = lam*1.0e-6
+        self.dlam = dlam*1.0e-6
+        self.pscale = pscale * 2.0 *numpy.pi/360.0/60.0**2.0/1.0e3
+        self.M1 = M1
+        self.M2 = M2
+        self.nLambdaSteps = nLambdaSteps
+        self.fmax = self.M1 * self.pscale * self.sizeInPix/self.lam
+
+    def Sinc(self, x):
+        if numpy.abs(x) < 1e-4:
+            return 1.0
+        else:
+            return numpy.sin(x)/x
+
+    def H1(self, f, u, v):
+        if numpy.abs(1.0-v) < 1e-12:
+            e = 1
+        else:
+            e = -1
+        return v**2.0/numpy.pi *numpy.arccos((f/v) * (1.0+e*(1.0-u**2.0)/(4*f**2.0)))
+
+    def H2(self, f, u):
+        a = 2.0*f/(1.0+u)
+        b = (1.0-u)/(2.0*f)
+        return -1.0*(f/numpy.pi)*(1.0+u)*numpy.sqrt((1.0-a**2.0)*(1.0-b**2.0))
+
+    def G(self, f, u):
+        if f <= (1.0 - u)/2.0:
+            return u**2.0
+        elif f >= (1.0 + u)/2.0:
+            return 0.0
+        else:
+            return self.H1(f, u, 1.0) + self.H1(f, u, u) + self.H2(f, u)
+
+    def TelOTF(self, f, u):
+        retval = (self.G(f, 1.0) + u**2.0*self.G(f/u, 1) - 2*self.G(f, u))/(1.0 - u**2.0)
+        return retval
+
+    def generateOTF(self):
+        total = numpy.zeros([self.sizeInPix, self.sizeInPix])
+        for k in numpy.arange(self.nLambdaSteps):
+            l = self.lam - self.dlam*(k - self.nLambdaSteps/2.0)/(self.nLambdaSteps - 1)
+            fc = self.fmax*self.lam/l
+
+            for i in range(self.sizeInPix):
+                for j in range(self.sizeInPix):
+                    y = j - self.sizeInPix/2.0 + 0.5
+                    x = i - self.sizeInPix/2.0 + 0.5
+                    r = numpy.sqrt(x**2.0 + y**2.0)
+                    f = r/fc
+                    if f < 1:
+                        if r < 0.1:
+                            total[i, j] += 1.0/nLambdaSteps
+                        else:
+                            total[i, j] += (self.TelOTF(f, self.M2/self.M1)*self.Sinc(numpy.pi*x/self.sizeInPix)
+                                                       *self.Sinc(numpy.pi*y/self.sizeInPix))/self.nLambdaSteps
+                    else:
+                        total[i, j] += 0.0
+        self.OTF = total
+        self.PSF = numpy.fft.fftshift(numpy.abs(numpy.fft.fft2(self.OTF)))
+        self.PSF = self.normalize(self.PSF)
+
+    def getPSF(self):
+        return self.PSF
+
+    def normalize(self, image):
+        return image/numpy.max(image)
+
+    def calcStrehl(self, cutout):
+        factor = numpy.sum(self.PSF) / numpy.sum(cutout)
+        return numpy.max(cutout)*factor
+        
+
+
+class SubAperture( object ):
+    def __init__(self, index):
+        self.index = index
+        self.x = []
+        self.y = []
+        self.z = []
+
+    def addFluxPoint(self, tip, tilt, flux):
+        self.x.append(tip)
+        self.y.append(tilt)
+        self.z.append(flux)
+
+    def interpolate(self, tipRange=[-1, 1], tiltRange=[-1,1], spacing=0.01):
+        interpol = interp.interp2d(self.x, self.y, self.z, fill_value=0.0)
+        gridx = numpy.arange(tipRange[0], tipRange[1], spacing)
+        gridy = numpy.arange(tiltRange[0], tiltRange[1], spacing)
+
+        return interpol(gridx, gridy)
+
+
+class FOVFrame( object ):
+    def __init__(self, naps = 68):
+        self.subapertures = []
+        for i in range(naps):
+            self.subapertures.append(SubAperture(i))
+
+    def addFrame(self, tip, tilt, frame):
+        for subap, flux in zip(self.subapertures, frame):
+            subap.addFluxPoint(tip, tilt, flux)
+
+    def publish(self, ax):
+        for subap in self.subapertures:
+            postageStamp = subap.interpolate(tipRange=[-1, 1], 
+                                tiltRange=[-1, 1], spacing=0.01)
+            ax.clear()
+            ax.imshow(postageStamp)
+            ax.figure.show()
+            raw_input()
+        
+
 
 class PixelBuffer( object ):
     def __init__(self, df=''):
@@ -29,8 +150,11 @@ class PixelBuffer( object ):
         self.centroids = numpy.array(centroids)
 
 class CircularBuffer( object ):
-    def __init__(self, df='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None):
+    def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
+                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
         self.df = df
+        self.CDMS_BaseDir = CDMS_BaseDir
+        self.CDMS_ConfigDir = CDMS_ConfigDir
         self.directory = os.path.dirname(self.df)
         self.header = pyfits.getheader(df)
         self.data = pyfits.getdata(df)
@@ -42,28 +166,78 @@ class CircularBuffer( object ):
         self.FrameCounter = self.data.field('FrameCounter')
         self.time = self.data.field('Seconds')+self.data.field('USeconds')/100000.0
         self.time -= self.time[0]
+        self.loopRate = loopRate
+        self.RTC_Delay = RTC_Delay
+        self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
+        self.LambdaSeeing = 0.5e-6
+        self.LambdaStrehl = 2.2e-6
+        self.ReferenceSeeing = 1.0/(180.0*3600.0/numpy.pi)
+        self.L0 = numpy.inf
+        self.ApertureDiameter = 8.0
+        self.r0 = self.LambdaSeeing/self.ReferenceSeeing
+        self.CIAO_ID = self.header.get("ESO OCS SYS ID")
         if S2M != None:
             self.S2M = pyfits.getdata(S2M)
         else:
             self.S2M = None
         if ModalBasis != None:
-            self.ModalBasis = pyfits.getdata(ModalBasis, ignore_missing_end=True)
+            self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                ModalBasis, ignore_missing_end=True)
         else:
             self.ModalBasis = None
-        if Z2DM != None:
-            self.Z2DM = pyfits.getdata(Z2DM, ignore_missing_end=True)
-            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+        if HOIM != None:
+            self.HOIM = pyfits.getdata(HOIM, ignore_missing_end=True)
         else:
-            self.Z2DM = pyfits.getdata('../../data/cimdatZernike2DM.fits', 
-                    ignore_missing_end=True)
-            self.DM2Z = scipy.linalg.pinv(self.Z2DM)
+            self.HOIM = None
+        if TT2HO != None:
+            self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+TT2HO, 
+                                        ignore_missing_end=True)
+        else:
+            self.TT2HO = None
+        if CM != None:
+            self.CM = pyfits.getdata(CM, ignore_missing_end=True)
+            self.CM /= self.controlGain
+            self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
+        else:
+            self.CM = None
+        if TTM2Z != None:
+            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+TTM2Z,
+                                        ignore_missing_end = True)
+        else:
+            self.TTM2Z = None
+        if Z2DM != None:
+            self.Z2DM = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+Z2DM,
+                                       ignore_missing_end=True)
+            self.NZernikes = self.Z2DM.shape[1]
+            self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(self.NZernikes)])
+            if DM2Z == None:
+                self.DM2Z = linalg.pinv(self.Z2DM)
+            else:
+                self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+DM2Z,
+                                           ignore_missing_end=True)
+        else:
+            if DM2Z != None:
+                self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+DM2Z, 
+                                           ignore_missing_end=True)
+                self.Z2DM = linalg.pinv(self.DM2Z)
+            try:
+                self.Z2DM = pyfits.getdata(os.path.dirname(os.path.realpath(__file__))+
+                         '/../data/cimdatZernikeZ2DM.fits', ignore_missing_end=True)
+                self.DM2Z = linalg.pinv(self.Z2DM)
+            except:
+                self.Z2DM = None
+                self.DM2Z = None
         if S2Z != None:
             self.S2Z = pyfits.getdata(Z2DM, ignore_missing_end=True)
-            self.Z2S = scipy.linalg.pinv(self.S2Z)
+            self.Z2S = linalg.pinv(self.S2Z)
         else:
-            self.S2Z = pyfits.getdata('../../data/Slopes2Z.fits', 
-                    ignore_missing_end=True)
-            self.Z2S = scipy.linalg.pinv(self.S2Z)
+            try:
+                self.S2Z = self.DM2Z.dot(self.CM[:60])
+                self.Z2S = linalg.pinv(self.S2Z)
+            except:
+                self.S2Z = None
+                self.Z2S = None
+        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
 
     def loadTemplateMaps(self):
         self.expno = self.header.get("HIERARCH ESO TPL EXPNO")
@@ -75,7 +249,7 @@ class CircularBuffer( object ):
                 '/RecnOptimiser.S2M_%04d.fits' % (self.expno+1))
         self.M2V = pyfits.getdata(self.directory+
                 '/RecnOptimiser.M2V_%04d.fits' % (self.expno+1))
-        self.V2M = scipy.linalg.pinv(self.M2V)
+        self.V2M = linalg.pinv(self.M2V)
         self.getDisturbanceRegions()
 
     def getDisturbanceRegions(self, start = None, stop = None):
@@ -119,6 +293,15 @@ class CircularBuffer( object ):
         self.FFT = fftpack.fftshift(fftpack.fft(self.modes))
         self.FFT = self.FFT * self.FFT.conjugate()
         self.freq = fftpack.fftshift(fftpack.fftfreq(len(self.modes[0]), 1.0/526.7))
+    
+    def processFOV(self, ax=None):
+        FOV = FOVFrame()
+        startingPoint = self.TTM[0]
+        for tt, frame in zip(self.TTM, self.Intensities):
+            if ((tt[0] != startingPoint[0]) & (tt[1] != startingPoint[1])):
+                FOV.addFrame(tt[0], tt[1], frame)
+
+        FOV.publish(ax)
 
     def extractModulation(self, ax = None):
         firstActuator = self.HODM[:,0]
@@ -144,7 +327,7 @@ class CircularBuffer( object ):
             response = []
             counter += 1
             for slope in self.Gradients[self.modulation_start+1:self.modulation_stop+1,:].T:
-                response.append(scipy.signal.correlate(slope, m, mode='valid')[0])
+                response.append(signal.correlate(slope, m, mode='valid')[0])
             IM.append(response)
         
         self.IM = numpy.array(IM)
@@ -161,6 +344,417 @@ class CircularBuffer( object ):
         self.ProcessedVoltages = ProcessedData(self.HODM, self.V2M[:,:-2]/1e-6,
                 self.DM2Z.T/1e-6)
         
+    def synchronizeData(self):
+        self.TTM = self.TTM[:-3,:]
+        #self.TTM = self.TTM[2:-1,:]
+        self.HODM = self.HODM[2:-1,:]
+        self.Gradients = self.Gradients[3:,:]
+        
+        self.TTM -= numpy.mean(self.TTM, axis=0)
+        self.HODM -= numpy.mean(self.HODM, axis=0)
+        self.Gradients -= numpy.mean(self.Gradients, axis=0)
+        
+    def zernikeSpace(self):
+        self.ZSlopes = self.Gradients.dot(self.S2Z.T)
+        self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
+        
+    def computePSD(self, source):
+        NWindows = 1
+        Resolution = 0.5
+        if source == 'ZSlopes':
+            data = self.ZSlopes
+        elif source == 'ZCommands':
+            data = self.ZCommands
+        NWindows = computeNWindows(data, self.loopRate, Resolution)
+        NSeries = data.shape[1]
+        data = FourierDetrend(data, 'TwoPoints') 
+
+        NFrames = data.shape[0]
+        Power = numpy.abs(numpy.fft.fft(data.T/NFrames))**2.0
+        Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+
+        Power = numpy.fft.fftshift(Power, axes=1)
+        Freq = numpy.fft.fftshift(Freq)
+        Power = 2.0*Power[:,Freq >= 0]
+        Freq = Freq[Freq >= 0]
+        Power[:,0] /= 2.0
+        Power = Power / numpy.mean(numpy.diff(Freq))
+
+        NSamplesPerWindow = numpy.floor(Power.shape[1]/NWindows)
+        TotalSampleNumber = NWindows * NSamplesPerWindow
+        Power = Power.T
+
+        if NWindows > 1:
+            Power = Power[:TotalSampleNumber, :]
+            Power = Power.reshape([NWindows, NSamplesPerWindow, NSeries], order='F')
+            Power = numpy.mean(Power, axis=0)
+
+            Freq = Freq[:TotalSampleNumber]
+            Freq = Freq.reshape([NWindows, NSamplesPerWindow], order = 'F')
+            Freq = numpy.mean(Freq, axis = 0)
+
+        if source == 'ZSlopes':
+            self.ZPowerSlopes = Power
+            self.ZPowerFrequencies = Freq
+            self.ZPowerdFrequencies = numpy.mean(numpy.diff(self.ZPowerFrequencies))
+        elif source == 'ZCommands':
+            self.ZPowerCommands = Power
+        return
+
+    def AORejectionFunction(self):     # AORejection, WFS, RTC, NoisePropagation
+        self.WFS2 = numpy.sum(self.ZPowerSlopes) * self.ZPowerdFrequencies
+        Omega = 2*numpy.pi*self.ZPowerFrequencies
+        iOmega = (0.0 + 1.0j)*Omega
+        
+        RTC_Period = 1.0/self.loopRate
+        CycleDelay = numpy.exp(-RTC_Period*iOmega)
+        CPU_Delay = numpy.exp(-self.RTC_Delay*iOmega)
+
+        GainNumerator = numpy.array([self.controlGain])
+        GainDenominator = numpy.array([1, -1])
+        Numerator = GetTF(GainNumerator, CycleDelay)
+        Denominator = GetTF(GainDenominator, CycleDelay)
+        Controller = Numerator/Denominator
+
+
+        DM = 1
+
+        Ratio = self.RTC_Delay/RTC_Period
+        N = numpy.floor(Ratio)
+        alpha = Ratio - N
+
+        RSinPhi = -alpha*numpy.sin(Omega*RTC_Period)
+        RCosPhi = 1.0-alpha*(1.0-numpy.cos(Omega*RTC_Period))
+        Phi = numpy.arctan2(RSinPhi, RCosPhi)
+        R = numpy.sqrt(RSinPhi**2.0 + RCosPhi**2.0)
+
+        self.WFS = R*numpy.exp((0.0+1.0j)*Phi)*CycleDelay**(N+1)
+
+        self.RTC = Controller * DM
+        OpenLoop_TF = self.WFS*self.RTC
+        self.AORejection = 1.0/(1.0+OpenLoop_TF)
+        self.NoisePropagation = self.RTC*self.AORejection
+
+        self.AORejection[numpy.isnan(self.AORejection)]= 0.0
+        self.WFS[numpy.isnan(self.WFS)] = 0.0
+        self.RTC[numpy.isnan(self.RTC)] = 0.0
+        self.NoisePropagation[numpy.isnan(self.NoisePropagation)] = 0.0
+        self.AORejection = numpy.abs(self.AORejection)**2.0
+
+    #def measureVibrations(self)
+
+    def combinePSDs(self):
+        RTC2 = numpy.abs(self.RTC)**2.0
+
+        RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])]).T
+        self.ZPowerCommands = (RTC2S.T + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2).T
+        self.ZPowerSlopes = self.ZPowerCommands/RTC2
+        
+
+    def computeKolmogorovCovar(self):
+        D_L0 = self.ApertureDiameter/self.L0
+
+        infOuterScaleCovar, radial_orders = newKTaiaj(self.NZernikes+1, self.NZernikes+1, self.ApertureDiameter, self.r0)
+        infOuterScaleCovar[:,0] = 0.0
+        infOuterScaleCovar[0,:] = 0.0
+
+        max_radial_order = numpy.int(numpy.max(radial_orders))
+
+        reduc_var = OuterScale2VarianceReduction(D_L0, max_radial_order)
+        reduction_factors = numpy.ones(radial_orders.shape)
+
+        interp = scipy.interpolate.interp1d(numpy.array(range(max_radial_order))+1, reduc_var)
+        blah = radial_orders != 0.0
+        reduction_factors[blah] = interp(radial_orders[blah])
+
+        self.KolmogorovCovar = infOuterScaleCovar * reduction_factors
+        FullVariance, n = KolmogorovVariance(self.ApertureDiameter, self.L0, self.r0, 1000)
+
+        self.FullVariance = numpy.sum(FullVariance)
+        self.FractionOfTotalVariance = numpy.real(numpy.sum(numpy.diag(self.KolmogorovCovar))/self.FullVariance)
+
+        self.OffControl = numpy.sum(numpy.diag(self.KolmogorovCovar))*(1.0/self.FractionOfTotalVariance -1.0)
+        self.KolmogorovCovar = self.KolmogorovCovar[1:, 1:]
+
+        self.KolmogorovCovar = self.KolmogorovCovar.T * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+        self.OffControl = numpy.real(self.OffControl) * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+
+    def zernikePropagation(self):
+        self.ZernikePropagation = self.Voltage2Zernike[:60,:].T.dot(self.CM[:60,:]).dot(self.HOIM.dot(self.Z2DM))
+        self.ZernikePropagation[0][0] = 1.0
+        self.ZernikePropagation[1][1] = 1.0
+        self.ZernikePropagation[0][1] = 0.0
+        self.ZernikePropagation[1][0] = 0.0
+        self.PropagatedKolmogorovCovar = self.ZernikePropagation.dot(self.KolmogorovCovar).dot(self.ZernikePropagation.T)
+
+    def seeingEstimation(self, ax=None):
+        self.Arcsec = 180.0*3600.0/numpy.pi
+        self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
+        self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
+        self.A=self.ZPowerCommands.T-numpy.array([self.ZPowerNoise[n,:] * self.LocalNoiseFactor[n] for n 
+                     in range(self.LocalNoiseFactor.shape[0])])
+        self.ZPowerAtmosphere = numpy.array([self.A[n,:]*self.LocalAtmosphereFactor[n] for n
+                     in range(self.A.shape[0])])
+        AtmosphereTotalPower = self.ZPowerdFrequencies*numpy.sum(self.ZPowerAtmosphere[:,self.ZIn])
+        K = numpy.sum(numpy.array(self.PropagatedKolmogorovCovar.diagonal())[self.ZIn])
+        self.SeeingScale = AtmosphereTotalPower/K
+        self.Seeing = numpy.real(self.SeeingScale**(3.0/5.0)/self.Arcsec)
+        
+    def computeSpectralSlope(self, FLim):
+        IPropagated = numpy.sum(numpy.array(self.PropagatedKolmogorovCovar.diagonal())[self.ZIn])
+        IFull = numpy.sum(numpy.array(self.KolmogorovCovar.diagonal()))
+        Ratio = IPropagated/IFull
+
+        Wavelength = 0.5e-6
+        TargetIntegral = Ratio * (Wavelength /(2.0*numpy.pi))**2.0
+
+        A = numpy.sum(self.ZPowerCommands[self.ZIn, :], axis=0)
+        
+        In = (self.ZPowerFrequencies > FLim[0]) & (self.ZPowerFrequencies < FLim[1])
+
+        F = self.ZPowerFrequencies[In]
+
+        Power = A[In]
+
+        LogF = numpy.log10(F)
+        LogPower = numpy.log10(Power)
+
+        m = numpy.array([numpy.ones(LogF.shape), LogF])
+        im = numpy.linalg.pinv(m)
+
+        self.SpectralSlopes = im.T.dot(LogPower)
+
+        F = self.ZPowerFrequencies
+        LogF = numpy.log10(F)
+        m = numpy.array([numpy.ones(LogF.shape), LogF])
+        Model = 10.0**(m.T.dot(self.SpectralSlopes))
+        LowFreq = F <= FLim[0]
+        Model[LowFreq] = A[LowFreq]
+
+        dF = numpy.mean(numpy.diff(F))
+        dt = 0
+        OK = True
+        Tau0Max = 0.02
+        Step0 = 0.001
+        dFModel = Model*dF
+
+        while True:
+            dt = dt+ 0.001
+            if dt > Tau0Max:
+                OK = False
+                break
+            I = ComputeIntegral(dFModel, F, dt)
+            if I > TargetIntegral:
+                break
+        if not(OK):
+            self.Tau0 = Tau0Max
+            return
+        Low = dt - Step0
+        High = dt
+        Step = Step0
+        while Step >= Step0/20:
+            Middle = (Low + High)/2.0
+            I = ComputeIntegral(dFModel, F, Middle)
+            if I > TargetIntegral:
+                High = Middle
+            else:
+                Low = Middle
+            Step = Step / 2.0
+        ILow = ComputeIntegral(dFModel, F, Low)
+        IHigh = ComputeIntegral(dFModel, F, High)
+
+        interp = scipy.interpolate.interp1d([ILow, IHigh], [Low, High])
+        self.Tau0 = interp(numpy.real(TargetIntegral)).tolist()
+
+        return 
+
+    def estimateStrehlRatio(self, ax=None):
+        self.OffControl = 1.0 * self.OffControl * self.SeeingScale
+        self.ScaledKolmogorovCovar = self.KolmogorovCovar * self.SeeingScale
+        self.PropagatedKolmogorovCovar *= self.SeeingScale
+        self.UnPropagated = (self.ScaledKolmogorovCovar - self.PropagatedKolmogorovCovar).diagonal()
+        self.OffControl += numpy.sum(self.UnPropagated) 
+
+        self.ZPowerWFS = self.ZPowerSlopes.T - self.ZPowerNoise
+        self.ZPowerWFS = numpy.array([self.ZPowerWFS[n,:]/(numpy.abs(self.WFS)**2.0)[n] for n in range(self.ZPowerWFS.shape[0])])
+
+        self.TotalWFE2 = numpy.max([0.0, self.WFS2+self.OffControl])
+        self.WFE = numpy.sqrt(self.TotalWFE2)
+
+        self.WFSError = numpy.sqrt(numpy.max([0.0, self.WFS2]))
+        self.Strehl = numpy.real(numpy.exp(-(2.0*numpy.pi*self.WFE/self.LambdaStrehl)**2.0))
+        self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
+        self.rms = numpy.mean(numpy.std(self.Gradients))
+        if ax != None:
+            print 'OffControl: %E' % self.OffControl
+            print 'WFE: %E' % self.WFE
+            print 'WFSError: %E' % self.WFSError
+            print 'Strehl: %f' % self.Strehl
+            raw_input()
+
+    def noiseEvaluation(self):
+        FMax = numpy.max(self.ZPowerFrequencies)
+        Weights = self.AORejection * self.ZPowerFrequencies/FMax
+        Weights[self.ZPowerFrequencies < FMax/2.0] = 0
+        Noise = numpy.sum(Weights * self.ZPowerSlopes, axis=1)/numpy.sum(Weights)
+
+        Reference = numpy.array([self.AORejection]).T.dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)/FMax]))
+        ReferenceNoise = Weights.dot(Reference)/numpy.sum(Weights)
+
+        self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn])/numpy.mean(ReferenceNoise[self.ZIn]))
+        #self.ZPowerNoise = Reference * self.WFSNoise**2.0
+        self.ZPowerNoise = self.WFSNoise**2.0 * numpy.ones([self.ZPowerFrequencies.shape[0],1]).dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)]))/numpy.max(self.ZPowerFrequencies)
+
+def ComputeIntegral(dFModel, F, dt):
+    Integrant = dFModel * numpy.abs(1.0 - numpy.cos(2.0*numpy.pi*F*dt))
+    return numpy.sum(Integrant)
+
+def KolmogorovVariance(D, L0, r0, nOrders):
+    cst = gamma(11./6.)**2.0*gamma(14./3.)*(24.0*gamma(6./5.)/5.)**(5./6.)/(2.**(8./3.)*numpy.pi)/gamma(17./6.)**2.
+
+    n, m, Sign = FindNM(nOrders)
+
+    y = cst * (-1)**(n-m)*(n+1.0)*gamma(n-5./6.)/gamma(n+23./6.)
+
+    reduc_var = OuterScale2VarianceReduction(D/L0,numpy.max(n))
+    reduction_factors = numpy.ones(n.shape)
+    blah = n != 0.0
+    for i in range(nOrders):
+        if blah[i]:
+            reduction_factors[i] = reduc_var[n[i]-1]
+    #reduction_factors[blah] = reduc_var[n[blah]]
+
+    y = y * reduction_factors
+    y = y * (D/r0) **(5./3.)
+    y[0] = 0
+    i = numpy.array(range(nOrders))
+    y = y[i]
+
+    return y, n
+
+    
+
+def OuterScale2VarianceReduction(D, maxrad):
+    n_rad = numpy.array(range(int(maxrad)))+1.0
+
+    x = D/2.
+    y = x**(2*n_rad-5.0/3.0)
+    w = 1
+
+    p = 0
+    facto_p = 1
+    sign_p = 1
+    reduc_var = 0
+
+    mult = gamma(n_rad-5./6.) / gamma(n_rad + 23./6.)
+    variance = 0.756 * (n_rad+1)*mult
+
+    increase = 1
+    threshold = 1e-5
+
+    while numpy.max(numpy.abs(increase)) > threshold:
+        mult = gamma(p+n_rad+1.5)*gamma(-p-n_rad+5./6.)*gamma(p+n_rad+1.0)
+        mult /= gamma(p+2*n_rad+3.0)*gamma(p+n_rad+2.0)
+        increase = sign_p / facto_p * y * mult
+
+        mult = gamma(-p+n_rad-5.0/6.0) * gamma(p+7.0/3.0) * gamma(p+11.0/6.0)
+        mult /= gamma(p+n_rad+23.0/6.0)*gamma(p+17./6.)
+        increase = increase + sign_p /facto_p*w*mult
+
+        reduc_var = reduc_var + increase
+        increase = increase / reduc_var
+        y = y*x**2.0
+        w = w*x**2.0
+        p = p+1
+        facto_p = facto_p*p
+        sign_p = -sign_p
+
+    reduc_var = reduc_var * 1.1641 * (n_rad+1.0)/variance
+    reduc_var[n_rad<1] = 1.0
+    reduc_var[reduc_var > 1] = 1.0
+
+    return reduc_var
+
+def newKTaiaj(i, j, D, r0):
+    cst = gamma(11.0/6.0)**2.0*gamma(14./3.)*(24*gamma(6.0/5.0)/5.0)**(5.0/6.0)/(2.0**(8.0/3.0)*numpy.pi)
+
+    ni, mi, Sign = FindNM(i)
+    nj, mj, Sign = FindNM(j)
+
+    NI = []
+    MI = []
+    NJ = []
+    MJ = []
+    I = []
+    J = []
+    for x in range(j):
+        NI.append(ni)
+        MI.append(mi)
+        NJ.append(nj)
+        MJ.append(mj)
+        I.append(numpy.array(range(i)) + 1.0)
+        J.append(numpy.array(range(j)) + 1.0)
+
+    ni = numpy.array(NI)
+    mi = numpy.array(MI)
+    nj = numpy.array(NJ).T
+    mj = numpy.array(MJ).T
+    i = numpy.array(I)
+    j = numpy.array(J).T
+
+    n = numpy.sqrt(ni*nj)
+    y = cst *(-1.0+0j)**((ni+nj-2*mi)/2.0)*numpy.sqrt((ni+1)*(nj+1))*gamma((ni+nj-5./3.)/2.) / (gamma((ni-nj+17./3.)/2.0) * gamma((nj-ni+17.0/3.0)/2.0) *
+              gamma((ni+nj+23./3.0)/2.0))
+    y[mi!=mj] = 0.0
+    blah = numpy.remainder(numpy.abs(i-j),2)==1
+    junk = mi !=0
+    y *= 1.0*((blah & junk) == False)
+    y = y * (D/r0)**(5.0/3.0)
+
+    return y, n
+
+def FindNM(i):
+    mode = numpy.array(range(i))+1.0
+    nf = numpy.ceil(numpy.sqrt(2.0*mode+0.25)-1.5)
+
+    mf = mode - nf*(nf+1)/2.0
+    odd = numpy.mod(nf,2) == 1
+
+    mf[odd] = 2*numpy.floor((mf[odd]+1)/2) -1
+    mf[odd==False] = 2*numpy.floor(mf[odd==False]/2)
+    Sign = numpy.mod(mode - (nf-1)*nf/2,2)
+
+    return nf, mf, Sign
+
+
+
+def GetTF(Coeffs, Delay):
+    H = 0
+    for k in range(len(Coeffs)):
+        H = H + Coeffs[k]*Delay**(k)
+    return H
+
+def computeNWindows(data, loopRate, R):
+    N = data.shape[0]
+    dF = loopRate/(1.0*N)
+    NWindows = round(R/dF)
+    NWindows = max(1, NWindows)
+    return NWindows
+
+
+def FourierDetrend(data, detrend):
+    if detrend.lower() == 'twopoints':
+        n = data.shape[0]
+        m = numpy.ones((n,2))
+        m[:,1] = [j+1-(1+n)/2.0 for j in range(n)]
+        im = linalg.pinv(m[(0,-1),:])
+        c = im.dot(data[(0,-1),:])
+
+        data = data-m.dot(c)
+
+        return  data - numpy.mean(data, axis=0)
+
+
 class ProcessedData ( object ):
     def __init__(self, data, modeProjection, zernikeProjection):
         self.average = numpy.average(data, axis=0)
@@ -177,25 +771,161 @@ class ProcessedData ( object ):
         self.zerns_std = numpy.std(self.zerns, axis=0)
 
 class Controller( object ):
-    def __init__(self, CM = None, iTT2HO=None, TT2HO=None):
-        self.CM = pyfits.getdata(CM)
+    def __init__(self, CM = None):
+        self.CM = CM
         self.HOCM = self.CM[:60,:]
         self.TTCM = self.CM[60:,:]
-        self.iTT2HO = pyfits.getdata(iTT2HO)
-        self.TT2HO = pyfits.getdata(TT2HO)
+        self.iTT2HO = pyfits.getdata('../../data/RecnOptimiser.ITT2HO.fits',
+                ignore_missing_end=True)
+        self.TT2HO = pyfits.getdata('../../data/RecnOptimiser.TT2HO.fits',
+                ignore_missing_end=True)
+        self.SMA = pyfits.getdata('../../data/HOCtr.SMA_MATRIX.fits',
+                ignore_missing_end=True)
+        self.ModalBasis = pyfits.getdata('../../data/RecnOptimiser.ModalBasis.fits',
+                ignore_missing_end=True)
+        self.P2DM = pyfits.getdata('../../data/HOCtr.P2DM_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.iP2DM = pyfits.getdata('../../data/HOCtr.IP2DM_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.GarbageProj = pyfits.getdata('../../data/HOCtr.GARBAGE_PROJECTION.fits',
+                ignore_missing_end=True)
+        self.KT = 0.001
+        self.KI = 0.5
 
     def computeDeltas(self, slopes):
         return self.HOCM.dot(slopes)
 
+    def computeCommands(self, slopes):
+        #HODM = self.HOCM.dot(slopes) - self.TT2HO.dot(
+        #        self.iTT2HO.dot(self.HOCM.dot(slopes)))
+        HODM = self.HOCM.dot(slopes)
+        TTM = self.TTCM.dot(slopes)
+        HODM = HODM + self.TT2HO.dot(TTM)
+
+        return HODM
+
+    def doSMA(self, command):
+        saturated = command.copy()
+        #saturated[saturated < self.
+        return command
+        
+
 class LoopAnalyzer( object):
-    def __init__(self, HOCtr=None, CB =None):
-        self.HOCtr = HOCtr
-        self.CB = CircularBuffer(CB)
+    def __init__(self, df =None):
+        self.CB = CircularBuffer(df = df)
+        self.CB.loadTemplateMaps()
+        self.HOCtr = Controller(self.CB.CM)
         self.predictions = []
 
+
     def predict(self):
+        predictions = []
         for frame, mirror in zip(self.CB.Gradients, self.CB.HODM):
-            self.predictions.append(mirror-self.HOCtr.computeDeltas(frame))
+            Pipeline = (1.0-self.HOCtr.KT)*mirror - \
+                      self.HOCtr.KI * self.HOCtr.computeCommands(frame)
+            Pipeline = Pipeline + self.CB.HO_ACT_REF_MAP
+            Pipeline = self.HOCtr.doSMA(Pipeline)
+            predictions.append(Pipeline)
+        
+        self.predictions = numpy.array(predictions)
+
+class AcqCamImage( object ):
+    def __init__(self, datadir='', df=''):
+        self.datadir = datadir
+        self.df = df
+        self.imageCube = pyfits.getdata(self.datadir+self.df)
+        self.sky = pyfits.getdata(self.datadir+'sky.fits')
+        self.dead = pyfits.getdata(self.datadir+'dead.fits')
+
+        self.x = numpy.array([1565, 1130, 660, 150])
+        self.y = numpy.array([130, 120, 125, 125])
+        self.width = 250
+        self.clean()
+        #self.mean = numpy.mean(self.imageCube)
+        #self.std = numpy.std(self.imageCube)
+
+    def clean(self):
+        self.cleanSky = {}
+        for ut in range(4):
+            cleaned = numpy.zeros(self.sky.shape)
+            for x in numpy.arange(self.x[ut], self.x[ut]+self.width):
+                for y in numpy.arange(self.y[ut], self.y[ut]+self.width):
+                    if self.dead[y][x] == 1:
+                        r = 1
+                        while True:
+                            region = self.dead[y-(r+1):y+r, x-(r+1):x+r]
+                            if numpy.sum(region) - region.shape[0]*region.shape[1] < -3.0:
+                                break
+                            else:
+                                r += 1
+                        cleaned[y][x] = numpy.median(self.sky[y-(r+1):y+r, x-(r+1):x+r][self.dead[y-(r+1):y+r,x-(r+1):x+r]==0])
+                    else:
+                        cleaned[y][x] = self.sky[y][x]
+            self.cleanSky[ut] = cleaned[self.y[ut]:self.y[ut]+self.width, self.x[ut]:self.x[ut]+self.width].copy()
+        #"""
+        self.clean = {}
+        self.mean = {}
+        self.std = {}
+        for ut in range(4):
+            print ut
+            cleaned = []
+            mean = []
+            std = []
+            for frame in self.imageCube:
+                for x in numpy.arange(self.x[ut], self.x[ut]+self.width):
+                    for y in numpy.arange(self.y[ut], self.y[ut]+self.width):
+                        if self.dead[y][x] == 1:
+                            r = 1
+                            while True:
+                                region = self.dead[y-(r+1):y+r, x-(r+1):x+r]
+                                if numpy.sum(region) - region.shape[0]*region.shape[1] < -3.0:
+                                    break
+                                else:
+                                    r += 1
+                            frame[y][x] = numpy.median(frame[y-(r+1):y+r,x-(r+1):x+r][self.dead[y-(r+1):y+r, x-(r+1):x+r]==0])
+                cleaned.append(frame[self.y[ut]:self.y[ut]+self.width, self.x[ut]:self.x[ut]+self.width]- self.cleanSky[ut])
+                mean.append(numpy.mean(cleaned[-1]))
+                std.append(numpy.std(cleaned[-1]))
+
+            self.clean[ut] = numpy.array(cleaned)
+            self.mean[ut] = numpy.array(mean)
+            self.std[ut] = numpy.array(std)
+        #"""
+
+    def findPeaks(self, size=4):
+        neighborhood = generate_binary_structure(2, 2)
+        self.x = {}
+        self.y = {}
+        for ut in range(4):
+            for frame in self.clean[ut]:
+                local_max = maximum_filter(frame, size=size)==frame
+                coordx, coordy =numpy.meshgrid(numpy.arange(frame.shape[0]),numpy.arange(frame.shape[1]))
+            self.x[ut] = coordx[local_max]
+            self.y[ut] = coordy[local_max]
+
+    def stack(self):
+        self.postageStamps = {}
+        self.speckleStamps = {}
+        for ut in range(4):
+            postageStamp = []
+            speckleStamp = []
+            for frame, mean, std in zip(self.clean[ut], self.mean[ut], self.std[ut]):
+                PS = []
+                goodX = []
+                goodY = []
+                for x, y in zip(self.x[ut], self.y[ut]):
+                    if (frame[y,x] > mean+2.0*std) & (10 < x <240) & (10 < y < 240):
+                        PS.append(frame[y-10:y+10, x-10:x+10])
+                        PS[-1] /= numpy.max(PS[-1])
+                        goodX.append(x)
+                        goodY.append(y)
+
+                #self.x[
+                postageStamp.append(numpy.median(numpy.array(PS), axis=0))
+                speckleStamp.append(numpy.array(PS))
+            self.postageStamps[ut] = numpy.array(postageStamp)
+            self.speckleStamps[ut] = numpy.array(speckleStamp)
+
 
 class FLIRCamImage( object ):
     def __init__(self, df):
@@ -394,9 +1124,6 @@ class NGCImage( object):
         xc = p[3]
         yc = p[4]
 
-        #print sig_x
-        #print numpy.rad2deg(theta)
-        #raw_input()
         if (p[1] >= 1.0):
             return numpy.zeros(64)
         if (p[2] < -180.0) or (p[2] > 180.0):
@@ -758,7 +1485,8 @@ class WFS ( object ):
         """
         self.derotator.setAngle(numpy.deg2rad(derotAngle))
         self.lenslet.setClockingAngle(lensletAngle)
-        self.pupil.setDecenter(pupil[0], pupil[1])
+        if pupil != None:
+            self.pupil.setDecenter(pupil[0], pupil[1])
         self.wavefront.setZern(zern)
         if actuatorPokes != None:
             self.DM.setMirror(actuatorPokes)
