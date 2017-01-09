@@ -133,6 +133,22 @@ class FOVFrame( object ):
         
 
 
+class PixelBuffer( object ):
+    def __init__(self, df=''):
+        self.df = df
+        self.directory = os.path.dirname(self.df)
+        self.header = pyfits.getheader(df)
+        self.data = pyfits.getdata(columns)
+        self.FrameCounter = self.data.field('FrameCounter')
+        self.Pixels = self.data.field('Pixels')
+
+    def computeCentroids(self):
+        centroids = []
+        for pix in self.Pixels:
+            centroids.append(self.computeCentroids(pix))
+
+        self.centroids = numpy.array(centroids)
+
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
                  DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
@@ -1631,6 +1647,19 @@ class detector( object ):
         return self.centroids[-1]
 
 
+    def measureCentroids(self, frame):
+        image = frame.reshape(72,72)
+        centroids = []
+        for x in range(9):
+            for y in range(9):
+                if self.parent.lenslet.SLapertureMap[x][y] != 0:
+                    ystart = y*8
+                    xstart = x*8
+                    subaperture = image[ystart:ystart+8, xstart:xstart+8].copy()
+                    centroids.append(scipy.ndimage.measurements.center_of_mass(
+                        subaperture))
+        return numpy.array(centroids)
+
     def calculateCentroids(self, zern, actuatorPokes):
         """
             Calcualates the locations of the centroids under the given 
@@ -1753,8 +1782,7 @@ class lensletArray( object ):
                 if self.SLapertureMap[i][j]:
                     y = (i-4)*self.spacing
                     x = (j-4)*self.spacing
-                    coords.append((x*numpy.cos(self.angle)-y*numpy.sin(self.angle),
-                        x*numpy.sin(self.angle)+y*numpy.cos(self.angle)))
+                    coords.append([(x*numpy.cos(self.angle)-y*numpy.sin(self.angle),x*numpy.sin(self.angle)+y*numpy.cos(self.angle))])
 
         self.coordinates = coords
 
