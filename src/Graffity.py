@@ -893,6 +893,7 @@ class AcqCamImage( object ):
         for ut in range(4):
             postageStamp = []
             speckleStamp = []
+            SS = {}
             for frame, mean, std in zip(self.clean[ut], self.mean[ut], self.std[ut]):
                 PS = []
                 goodX = []
@@ -903,12 +904,16 @@ class AcqCamImage( object ):
                         PS[-1] /= numpy.max(PS[-1])
                         goodX.append(x)
                         goodY.append(y)
+                        if str([x,y]) in SS.keys():
+                            SS[str([x,y])].append(frame[y-10:y+10, x-10:x+10])
+                        else:
+                            SS[str([x,y])] = [frame[y-10:y+10, x-10:x+10]]
 
-                #self.x[
                 postageStamp.append(numpy.median(numpy.array(PS), axis=0))
-                speckleStamp.append(numpy.array(PS))
+            for key in SS.keys():
+                SS[key] = numpy.array(SS[key])
             self.postageStamps[ut] = numpy.array(postageStamp)
-            self.speckleStamps[ut] = numpy.array(speckleStamp)
+            self.speckleStamps[ut] = SS
 
 
 class FLIRCamImage( object ):

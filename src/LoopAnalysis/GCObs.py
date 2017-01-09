@@ -243,7 +243,7 @@ dslopes_ut4 = numpy.array(dslopes_ut4)
 tau_ut4 = numpy.array(tau_ut4)
 dtau_ut4 = numpy.array(dtau_ut4)
 
-"""
+#"""
 #ax0.clear()
 
 A1 = []
