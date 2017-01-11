@@ -149,9 +149,41 @@ class PixelBuffer( object ):
 
         self.centroids = numpy.array(centroids)
 
+class WFS_Frame( object ):
+    def __init__(self, intensities = None, gradients = None):
+        self.intensities = intensities
+        self.gradients = gradients
+        self.subap = numpy.array([
+                [False, False, True, True, True, True, True, False, False],
+                [False, True, True, True, True, True, True, True, False],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, False, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [False, True, True, True, True, True, True, True, False],
+                [False, False, True, True, True, True, True, False, False]])
+        self.image = numpy.zeros(self.subap.shape)
+        counter = 0
+        for i in range(self.image.shape[0]):
+            for j in range(self.image.shape[1]):
+                if self.subap[j][i]:
+                    self.image[j][i] = self.intensities[counter]
+                    counter +=1
+
+
+    def plotIntensities(self, ax=None):
+        if ax == None:
+            fig = pyplot.figure(0)
+            ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+        ax.matshow(self.image)
+        ax.figure.show()
+
+        
+
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
-                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
+                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3, prefix=''):
         self.df = df
         self.CDMS_BaseDir = CDMS_BaseDir
         self.CDMS_ConfigDir = CDMS_ConfigDir
@@ -201,7 +233,7 @@ class CircularBuffer( object ):
         else:
             self.CM = None
         if TTM2Z != None:
-            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+TTM2Z,
+            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+prefix+self.CDMS_ConfigDir+TTM2Z,
                                         ignore_missing_end = True)
         else:
             self.TTM2Z = None
@@ -586,10 +618,10 @@ class CircularBuffer( object ):
         self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
         self.rms = numpy.mean(numpy.std(self.Gradients))
         if ax != None:
-            print 'OffControl: %E' % self.OffControl
-            print 'WFE: %E' % self.WFE
-            print 'WFSError: %E' % self.WFSError
-            print 'Strehl: %f' % self.Strehl
+            print('OffControl: %E' % self.OffControl)
+            print('WFE: %E' % self.WFE)
+            print('WFSError: %E' % self.WFSError)
+            print('Strehl: %f' % self.Strehl)
             raw_input()
 
     def noiseEvaluation(self):
@@ -867,7 +899,7 @@ class AcqCamImage( object ):
         self.mean = {}
         self.std = {}
         for ut in range(4):
-            print ut
+            print("%d" % ut)
             cleaned = []
             mean = []
             std = []
