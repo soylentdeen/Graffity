@@ -15,6 +15,8 @@ from scipy.special import gamma
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 
+print "Hi"
+
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
         self.sizeInPix = sizeInPix
