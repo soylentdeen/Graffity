@@ -17,9 +17,9 @@ fig0 = pyplot.figure(0)
 fig0.clear()
 ax0 = fig0.add_axes([0.1, 0.1, 0.8, 0.8])
 
-CIAO_dir = '/Users/ciao/Data/CIAO/DATA/2017-01-08_'
-CDMS_Dir = '/Users/ciao/Data/CIAO/DATABASE/UT4/OFFAXIS/Matrices/Common/'
-CDMS_BaseDir = '/Users/ciao/Data/CIAO/DATABASE/UT'
+CIAO_dir = '/home/cdeen/Data/CIAO/JanComm/2017-01-08_'
+CDMS_Dir = '/home/cdeen/Data/CIAO/DATABASE/UT4/OFFAXIS/Matrices/Common/'
+CDMS_BaseDir = '/home/cdeen/Data/CIAO/DATABASE/UT'
 CDMS_ConfigDir = '/OFFAXIS/Matrices/Common/'
 
 Az = {}
