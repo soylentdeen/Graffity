@@ -150,7 +150,10 @@ class CircularBuffer( object ):
         self.FrameCounter = self.data.field('FrameCounter')
         self.time = self.data.field('Seconds')+self.data.field('USeconds')/100000.0
         self.time -= self.time[0]
-        self.loopRate = loopRate
+        try:
+            self.loopRate = self.header.get('ESO AOS LOOP RATE')
+        except:
+            self.loopRate = loopRate
         self.RTC_Delay = RTC_Delay
         self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
         self.LambdaSeeing = 0.5e-6
@@ -221,6 +224,7 @@ class CircularBuffer( object ):
             except:
                 self.S2Z = None
                 self.Z2S = None
+                raise Exception("inverting CM failed!")
         self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
 
     def loadTemplateMaps(self):
