@@ -2,11 +2,11 @@ import Graffity
 import numpy
 import matplotlib.pyplot as pyplot
 import scipy
-import pyfits
+import astropy.io.fits as pyfits
 import sys
 import glob
 
-datadirs = glob.glob('/home/deen/Data/GRAVITY/MATLAB_DATA/2015-12-21/DATA_LOGGER*')
+datadirs = glob.glob('/Users/ciao/Data/CIAO/DATA/2015-12-21/DATA_LOGGER*')
 
 fX = []
 fY = []
@@ -32,7 +32,7 @@ for datadir in datadirs:
 
     sX.append(numpy.median(slopes[::2]))
     sY.append(numpy.median(slopes[1::2]))
-    print fX[-1], fY[-1], sX[-1], sY[-1]
+    print("%.2f %.2f %.2f %.f2" % (fX[-1], fY[-1], sX[-1], sY[-1]))
 
 ax.scatter(sX, sY)
 ax.set_xbound(-0.1, 0.1)

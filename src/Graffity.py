@@ -133,9 +133,57 @@ class FOVFrame( object ):
         
 
 
+class PixelBuffer( object ):
+    def __init__(self, df=''):
+        self.df = df
+        self.directory = os.path.dirname(self.df)
+        self.header = pyfits.getheader(df)
+        self.data = pyfits.getdata(columns)
+        self.FrameCounter = self.data.field('FrameCounter')
+        self.Pixels = self.data.field('Pixels')
+
+    def computeCentroids(self):
+        centroids = []
+        for pix in self.Pixels:
+            centroids.append(self.computeCentroids(pix))
+
+        self.centroids = numpy.array(centroids)
+
+class WFS_Frame( object ):
+    def __init__(self, intensities = None, gradients = None):
+        self.intensities = intensities
+        self.gradients = gradients
+        self.subap = numpy.array([
+                [False, False, True, True, True, True, True, False, False],
+                [False, True, True, True, True, True, True, True, False],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, False, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [True, True, True, True, True, True, True, True, True],
+                [False, True, True, True, True, True, True, True, False],
+                [False, False, True, True, True, True, True, False, False]])
+        self.image = numpy.zeros(self.subap.shape)
+        counter = 0
+        for i in range(self.image.shape[0]):
+            for j in range(self.image.shape[1]):
+                if self.subap[j][i]:
+                    self.image[j][i] = self.intensities[counter]
+                    counter +=1
+
+
+    def plotIntensities(self, ax=None):
+        if ax == None:
+            fig = pyplot.figure(0)
+            ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+        ax.matshow(self.image)
+        ax.figure.show()
+
+        
+
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
-                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3):
+                 DM2Z=None, TTM2Z=None, loopRate=500.0, RTC_Delay=0.5e-3, prefix=''):
         self.df = df
         self.CDMS_BaseDir = CDMS_BaseDir
         self.CDMS_ConfigDir = CDMS_ConfigDir
@@ -188,7 +236,7 @@ class CircularBuffer( object ):
         else:
             self.CM = None
         if TTM2Z != None:
-            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+TTM2Z,
+            self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+prefix+self.CDMS_ConfigDir+TTM2Z,
                                         ignore_missing_end = True)
         else:
             self.TTM2Z = None
@@ -574,10 +622,10 @@ class CircularBuffer( object ):
         self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
         self.rms = numpy.mean(numpy.std(self.Gradients))
         if ax != None:
-            print 'OffControl: %E' % self.OffControl
-            print 'WFE: %E' % self.WFE
-            print 'WFSError: %E' % self.WFSError
-            print 'Strehl: %f' % self.Strehl
+            print('OffControl: %E' % self.OffControl)
+            print('WFE: %E' % self.WFE)
+            print('WFSError: %E' % self.WFSError)
+            print('Strehl: %f' % self.Strehl)
             raw_input()
 
     def noiseEvaluation(self):
@@ -855,7 +903,7 @@ class AcqCamImage( object ):
         self.mean = {}
         self.std = {}
         for ut in range(4):
-            print ut
+            print("%d" % ut)
             cleaned = []
             mean = []
             std = []
@@ -897,6 +945,7 @@ class AcqCamImage( object ):
         for ut in range(4):
             postageStamp = []
             speckleStamp = []
+            SS = {}
             for frame, mean, std in zip(self.clean[ut], self.mean[ut], self.std[ut]):
                 PS = []
                 goodX = []
@@ -907,12 +956,16 @@ class AcqCamImage( object ):
                         PS[-1] /= numpy.max(PS[-1])
                         goodX.append(x)
                         goodY.append(y)
+                        if str([x,y]) in SS.keys():
+                            SS[str([x,y])].append(frame[y-10:y+10, x-10:x+10])
+                        else:
+                            SS[str([x,y])] = [frame[y-10:y+10, x-10:x+10]]
 
-                #self.x[
                 postageStamp.append(numpy.median(numpy.array(PS), axis=0))
-                speckleStamp.append(numpy.array(PS))
+            for key in SS.keys():
+                SS[key] = numpy.array(SS[key])
             self.postageStamps[ut] = numpy.array(postageStamp)
-            self.speckleStamps[ut] = numpy.array(speckleStamp)
+            self.speckleStamps[ut] = SS
 
 
 class FLIRCamImage( object ):
@@ -1630,6 +1683,19 @@ class detector( object ):
         return self.centroids[-1]
 
 
+    def measureCentroids(self, frame):
+        image = frame.reshape(72,72)
+        centroids = []
+        for x in range(9):
+            for y in range(9):
+                if self.parent.lenslet.SLapertureMap[x][y] != 0:
+                    ystart = y*8
+                    xstart = x*8
+                    subaperture = image[ystart:ystart+8, xstart:xstart+8].copy()
+                    centroids.append(scipy.ndimage.measurements.center_of_mass(
+                        subaperture))
+        return numpy.array(centroids)
+
     def calculateCentroids(self, zern, actuatorPokes):
         """
             Calcualates the locations of the centroids under the given 
@@ -1752,8 +1818,7 @@ class lensletArray( object ):
                 if self.SLapertureMap[i][j]:
                     y = (i-4)*self.spacing
                     x = (j-4)*self.spacing
-                    coords.append((x*numpy.cos(self.angle)-y*numpy.sin(self.angle),
-                        x*numpy.sin(self.angle)+y*numpy.cos(self.angle)))
+                    coords.append([(x*numpy.cos(self.angle)-y*numpy.sin(self.angle),x*numpy.sin(self.angle)+y*numpy.cos(self.angle))])
 
         self.coordinates = coords
 

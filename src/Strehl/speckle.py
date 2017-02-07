@@ -44,14 +44,19 @@ for f in files[:16]:
     StrehlRatios = {}
     for ut in range(4):
         StrehlRatios[ut] = []
+        stamps = {}
         for frame, PSF in zip(AcqCamImage.speckleStamps[ut], AcqCamImage.postageStamps[ut]):
             
+            for key in frame.keys():
+                average = frame[key]
+            """
             for star in frame:
                 ax.clear()
                 ax.matshow(star - PSF)
                 print numpy.max(star-PSF)
                 fig.show()
                 raw_input()
+            #"""
 
         StrehlRatios[ut] = numpy.array(StrehlRatios[ut])
         SRs[ut].append(numpy.mean(StrehlRatios[ut]))
