@@ -1,7 +1,7 @@
 import scipy
 import sqlite3
 
-connection = sqlite3.connect('/home/cdeen/Data/CIAO/Dataloggers.db')
+connection = sqlite3.connect('/data/cdeen/Data/CIAO/SQL/Dataloggers.db')
 
 cursor = connection.cursor()
 

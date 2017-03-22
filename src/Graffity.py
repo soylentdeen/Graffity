@@ -210,6 +210,12 @@ class DataLogger( object ):
     def loadData(self):
         self.header = pyfits.getheader(self.dir+'/CIAO_LOOP_0001.fits')
         self.CIAO_ID = self.header.get("ESO OCS SYS ID")
+        self.LambdaSeeing = 0.5e-6
+        self.LambdaStrehl = 2.2e-6
+        self.ReferenceSeeing = 1.0/(180.0*3600.0/numpy.pi)
+        self.L0 = numpy.inf
+        self.ApertureDiameter = 8.0
+        self.r0 = self.LambdaSeeing/self.ReferenceSeeing
         data = pyfits.getdata(self.dir+'/CIAO_LOOP_0001.fits')
         self.Intensities = data.field('Intensities')
         self.Gradients = data.field('Gradients')
@@ -242,6 +248,8 @@ class DataLogger( object ):
         #self.DM2Z = linalg.pinv(self.Z2DM)
         self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                    'RecnOptimiser.DM2Z.fits', ignore_missing_end=True)
+        self.S2Z = self.DM2Z.dot(self.CM[:60])
+        self.Z2S = linalg.pinv(self.S2Z)
         self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
     
     def addToDatabase(self):
@@ -378,7 +386,295 @@ class DataLogger( object ):
         self.outerRing = numpy.array(center_of_mass(self.WFS_Frame.outerRingImage)) - \
                               numpy.array([4.0, 4.0])
 
+    def computeStrehl(self, saveData=False):
+        self.synchronizeData()
+        self.zernikeSpace()
+        self.computePSD(source='ZSlopes')
+        self.computePSD(source='ZCommands')
+        self.AORejectionFunction()
+        self.combinePSDs()
+        self.computeKolmogorovCovar()
+        self.zernikePropagation()
+        self.noiseEvaluation()
+        self.seeingEstimation()
+        self.computeSpectralSlope((3,15))
+        self.estimateStrehlRatio()
+        self.computeTTResiduals()
 
+        if saveData:
+            TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.3f, SEEING = %.3f, TAU0 = %.3f, TIP_RESIDUALS = %.2f, TILT_RESIDUALS = %.2f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, TTResid[0], TTResid[1], self.startTime)
+            self.sqlCursor.execute(sqlCommand)
+
+
+    def synchronizeData(self):
+        self.TTM = self.TTM[:-3,:]
+        #self.TTM = self.TTM[2:-1,:]
+        self.HODM = self.HODM[2:-1,:]
+        self.Gradients = self.Gradients[3:,:]
+        
+        self.TTM -= numpy.mean(self.TTM, axis=0)
+        self.HODM -= numpy.mean(self.HODM, axis=0)
+        self.Gradients -= numpy.mean(self.Gradients, axis=0)
+        
+    def zernikeSpace(self):
+        self.ZSlopes = self.Gradients.dot(self.S2Z.T)
+        self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
+        
+    def computePSD(self, source):
+        NWindows = 1
+        Resolution = 0.5
+        if source == 'ZSlopes':
+            data = self.ZSlopes
+        elif source == 'ZCommands':
+            data = self.ZCommands
+        NWindows = computeNWindows(data, self.loopRate, Resolution)
+        NSeries = data.shape[1]
+        data = FourierDetrend(data, 'TwoPoints') 
+
+        NFrames = data.shape[0]
+        Power = numpy.abs(numpy.fft.fft(data.T/NFrames))**2.0
+        Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+
+        Power = numpy.fft.fftshift(Power, axes=1)
+        Freq = numpy.fft.fftshift(Freq)
+        Power = 2.0*Power[:,Freq >= 0]
+        Freq = Freq[Freq >= 0]
+        Power[:,0] /= 2.0
+        Power = Power / numpy.mean(numpy.diff(Freq))
+
+        NSamplesPerWindow = numpy.floor(Power.shape[1]/NWindows)
+        TotalSampleNumber = NWindows * NSamplesPerWindow
+        Power = Power.T
+
+        if NWindows > 1:
+            Power = Power[:TotalSampleNumber, :]
+            Power = Power.reshape([NWindows, NSamplesPerWindow, NSeries], order='F')
+            Power = numpy.mean(Power, axis=0)
+
+            Freq = Freq[:TotalSampleNumber]
+            Freq = Freq.reshape([NWindows, NSamplesPerWindow], order = 'F')
+            Freq = numpy.mean(Freq, axis = 0)
+
+        if source == 'ZSlopes':
+            self.ZPowerSlopes = Power
+            self.ZPowerFrequencies = Freq
+            self.ZPowerdFrequencies = numpy.mean(numpy.diff(self.ZPowerFrequencies))
+        elif source == 'ZCommands':
+            self.ZPowerCommands = Power
+        return
+
+    def AORejectionFunction(self):     # AORejection, WFS, RTC, NoisePropagation
+        self.WFS2 = numpy.sum(self.ZPowerSlopes) * self.ZPowerdFrequencies
+        Omega = 2*numpy.pi*self.ZPowerFrequencies
+        iOmega = (0.0 + 1.0j)*Omega
+        
+        RTC_Period = 1.0/self.loopRate
+        CycleDelay = numpy.exp(-RTC_Period*iOmega)
+        CPU_Delay = numpy.exp(-self.RTC_Delay*iOmega)
+
+        GainNumerator = numpy.array([self.controlGain])
+        GainDenominator = numpy.array([1, -1])
+        Numerator = GetTF(GainNumerator, CycleDelay)
+        Denominator = GetTF(GainDenominator, CycleDelay)
+        Controller = Numerator/Denominator
+
+
+        DM = 1
+
+        Ratio = self.RTC_Delay/RTC_Period
+        N = numpy.floor(Ratio)
+        alpha = Ratio - N
+
+        RSinPhi = -alpha*numpy.sin(Omega*RTC_Period)
+        RCosPhi = 1.0-alpha*(1.0-numpy.cos(Omega*RTC_Period))
+        Phi = numpy.arctan2(RSinPhi, RCosPhi)
+        R = numpy.sqrt(RSinPhi**2.0 + RCosPhi**2.0)
+
+        self.WFS = R*numpy.exp((0.0+1.0j)*Phi)*CycleDelay**(N+1)
+
+        self.RTC = Controller * DM
+        OpenLoop_TF = self.WFS*self.RTC
+        self.AORejection = 1.0/(1.0+OpenLoop_TF)
+        self.NoisePropagation = self.RTC*self.AORejection
+
+        self.AORejection[numpy.isnan(self.AORejection)]= 0.0
+        self.WFS[numpy.isnan(self.WFS)] = 0.0
+        self.RTC[numpy.isnan(self.RTC)] = 0.0
+        self.NoisePropagation[numpy.isnan(self.NoisePropagation)] = 0.0
+        self.AORejection = numpy.abs(self.AORejection)**2.0
+
+    #def measureVibrations(self)
+
+    def combinePSDs(self):
+        RTC2 = numpy.abs(self.RTC)**2.0
+
+        RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])]).T
+        self.ZPowerCommands = (RTC2S.T + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2).T
+        self.ZPowerSlopes = self.ZPowerCommands/RTC2
+        
+
+    def computeKolmogorovCovar(self):
+        D_L0 = self.ApertureDiameter/self.L0
+
+        infOuterScaleCovar, radial_orders = newKTaiaj(self.NZernikes+1, self.NZernikes+1, self.ApertureDiameter, self.r0)
+        infOuterScaleCovar[:,0] = 0.0
+        infOuterScaleCovar[0,:] = 0.0
+
+        max_radial_order = numpy.int(numpy.max(radial_orders))
+
+        reduc_var = OuterScale2VarianceReduction(D_L0, max_radial_order)
+        reduction_factors = numpy.ones(radial_orders.shape)
+
+        interp = scipy.interpolate.interp1d(numpy.array(range(max_radial_order))+1, reduc_var)
+        blah = radial_orders != 0.0
+        reduction_factors[blah] = interp(radial_orders[blah])
+
+        self.KolmogorovCovar = infOuterScaleCovar * reduction_factors
+        FullVariance, n = KolmogorovVariance(self.ApertureDiameter, self.L0, self.r0, 1000)
+
+        self.FullVariance = numpy.sum(FullVariance)
+        self.FractionOfTotalVariance = numpy.real(numpy.sum(numpy.diag(self.KolmogorovCovar))/self.FullVariance)
+
+        self.OffControl = numpy.sum(numpy.diag(self.KolmogorovCovar))*(1.0/self.FractionOfTotalVariance -1.0)
+        self.KolmogorovCovar = self.KolmogorovCovar[1:, 1:]
+
+        self.KolmogorovCovar = self.KolmogorovCovar.T * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+        self.OffControl = numpy.real(self.OffControl) * (self.LambdaSeeing/(numpy.pi*2.0))**2.0
+
+    def zernikePropagation(self):
+        self.ZernikePropagation = self.Voltage2Zernike[:60,:].T.dot(self.CM[:60,:]).dot(self.HOIM.dot(self.Z2DM))
+        self.ZernikePropagation[0][0] = 1.0
+        self.ZernikePropagation[1][1] = 1.0
+        self.ZernikePropagation[0][1] = 0.0
+        self.ZernikePropagation[1][0] = 0.0
+        self.PropagatedKolmogorovCovar = self.ZernikePropagation.dot(self.KolmogorovCovar).dot(self.ZernikePropagation.T)
+
+    def seeingEstimation(self, ax=None):
+        self.Arcsec = 180.0*3600.0/numpy.pi
+        self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
+        self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
+        self.A=self.ZPowerCommands.T-numpy.array([self.ZPowerNoise[n,:] * self.LocalNoiseFactor[n] for n 
+                     in range(self.LocalNoiseFactor.shape[0])])
+        self.ZPowerAtmosphere = numpy.array([self.A[n,:]*self.LocalAtmosphereFactor[n] for n
+                     in range(self.A.shape[0])])
+        AtmosphereTotalPower = self.ZPowerdFrequencies*numpy.sum(self.ZPowerAtmosphere[:,self.ZIn])
+        K = numpy.sum(numpy.array(self.PropagatedKolmogorovCovar.diagonal())[self.ZIn])
+        self.SeeingScale = AtmosphereTotalPower/K
+        self.Seeing = numpy.real(self.SeeingScale**(3.0/5.0)/self.Arcsec)
+        
+    def computeSpectralSlope(self, FLim):
+        IPropagated = numpy.sum(numpy.array(self.PropagatedKolmogorovCovar.diagonal())[self.ZIn])
+        IFull = numpy.sum(numpy.array(self.KolmogorovCovar.diagonal()))
+        Ratio = IPropagated/IFull
+
+        Wavelength = 0.5e-6
+        TargetIntegral = Ratio * (Wavelength /(2.0*numpy.pi))**2.0
+
+        A = numpy.sum(self.ZPowerCommands[self.ZIn, :], axis=0)
+        
+        In = (self.ZPowerFrequencies > FLim[0]) & (self.ZPowerFrequencies < FLim[1])
+
+        F = self.ZPowerFrequencies[In]
+
+        Power = A[In]
+
+        LogF = numpy.log10(F)
+        LogPower = numpy.log10(Power)
+
+        m = numpy.array([numpy.ones(LogF.shape), LogF])
+        im = numpy.linalg.pinv(m)
+
+        self.SpectralSlopes = im.T.dot(LogPower)
+
+        F = self.ZPowerFrequencies
+        LogF = numpy.log10(F)
+        m = numpy.array([numpy.ones(LogF.shape), LogF])
+        Model = 10.0**(m.T.dot(self.SpectralSlopes))
+        LowFreq = F <= FLim[0]
+        Model[LowFreq] = A[LowFreq]
+
+        dF = numpy.mean(numpy.diff(F))
+        dt = 0
+        OK = True
+        Tau0Max = 0.02
+        Step0 = 0.001
+        dFModel = Model*dF
+
+        while True:
+            dt = dt+ 0.001
+            if dt > Tau0Max:
+                OK = False
+                break
+            I = ComputeIntegral(dFModel, F, dt)
+            if I > TargetIntegral:
+                break
+        if not(OK):
+            self.Tau0 = Tau0Max
+            return
+        Low = dt - Step0
+        High = dt
+        Step = Step0
+        while Step >= Step0/20:
+            Middle = (Low + High)/2.0
+            I = ComputeIntegral(dFModel, F, Middle)
+            if I > TargetIntegral:
+                High = Middle
+            else:
+                Low = Middle
+            Step = Step / 2.0
+        ILow = ComputeIntegral(dFModel, F, Low)
+        IHigh = ComputeIntegral(dFModel, F, High)
+
+        interp = scipy.interpolate.interp1d([ILow, IHigh], [Low, High])
+        self.Tau0 = interp(numpy.real(TargetIntegral)).tolist()
+
+        return 
+
+    def estimateStrehlRatio(self, ax=None):
+        self.OffControl = 1.0 * self.OffControl * self.SeeingScale
+        self.ScaledKolmogorovCovar = self.KolmogorovCovar * self.SeeingScale
+        self.PropagatedKolmogorovCovar *= self.SeeingScale
+        self.UnPropagated = (self.ScaledKolmogorovCovar - self.PropagatedKolmogorovCovar).diagonal()
+        self.OffControl += numpy.sum(self.UnPropagated) 
+
+        self.ZPowerWFS = self.ZPowerSlopes.T - self.ZPowerNoise
+        self.ZPowerWFS = numpy.array([self.ZPowerWFS[n,:]/(numpy.abs(self.WFS)**2.0)[n] for n in range(self.ZPowerWFS.shape[0])])
+
+        self.TotalWFE2 = numpy.max([0.0, self.WFS2+self.OffControl])
+        self.WFE = numpy.sqrt(self.TotalWFE2)
+
+        self.WFSError = numpy.sqrt(numpy.max([0.0, self.WFS2]))
+        self.Strehl = numpy.real(numpy.exp(-(2.0*numpy.pi*self.WFE/self.LambdaStrehl)**2.0))
+        self.TemporalError = numpy.exp(-(2.0*numpy.pi*self.WFSError/self.LambdaStrehl)**2.0)
+        self.rms = numpy.mean(numpy.std(self.Gradients))
+        if ax != None:
+            print('OffControl: %E' % self.OffControl)
+            print('WFE: %E' % self.WFE)
+            print('WFSError: %E' % self.WFSError)
+            print('Strehl: %f' % self.Strehl)
+            raw_input()
+
+    def noiseEvaluation(self):
+        FMax = numpy.max(self.ZPowerFrequencies)
+        Weights = self.AORejection * self.ZPowerFrequencies/FMax
+        Weights[self.ZPowerFrequencies < FMax/2.0] = 0
+        Noise = numpy.sum(Weights * self.ZPowerSlopes, axis=1)/numpy.sum(Weights)
+
+        Reference = numpy.array([self.AORejection]).T.dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)/FMax]))
+        ReferenceNoise = Weights.dot(Reference)/numpy.sum(Weights)
+
+        self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn])/numpy.mean(ReferenceNoise[self.ZIn]))
+        #self.ZPowerNoise = Reference * self.WFSNoise**2.0
+        self.ZPowerNoise = self.WFSNoise**2.0 * numpy.ones([self.ZPowerFrequencies.shape[0],1]).dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)]))/numpy.max(self.ZPowerFrequencies)
+
+    def computeTTResiduals(self):
+        TTR = []
+        for frame in self.Gradients:
+            tip = numpy.mean(frame[0::2])
+            tilt = numpy.mean(frame[1::2])
+            TTR.append([tip, tilt])
+        self.TTResiduals = numpy.array(TTR)
 
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
