@@ -12,8 +12,10 @@ from PIL import Image
 from scipy import signal
 from scipy import linalg
 from scipy.special import gamma
+from scipy.ndimage.measurements import center_of_mass
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
+import time
 
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
@@ -164,12 +166,26 @@ class WFS_Frame( object ):
                 [False, True, True, True, True, True, True, True, False],
                 [False, False, True, True, True, True, True, False, False]])
         self.image = numpy.zeros(self.subap.shape)
-        counter = 0
-        for i in range(self.image.shape[0]):
-            for j in range(self.image.shape[1]):
-                if self.subap[j][i]:
-                    self.image[j][i] = self.intensities[counter]
-                    counter +=1
+        self.generateMasks()
+        
+    def generateMasks(self):
+        self.innerRing = numpy.ones(self.subap.shape) == 0.0
+        self.outerRing = numpy.ones(self.subap.shape) == 0.0
+
+        self.innerRing[3:6,3:6] = True
+        self.outerRing[0, 2:7] = True
+        self.outerRing[-1, 2:7] = True
+        self.outerRing[2:7, 0] = True
+        self.outerRing[2:7, -1] = True
+
+    def generateIntensityImage(self, intensities = None):
+        if intensities != None:
+            self.intensities = intensities
+        self.image[self.subap] = self.intensities
+        self.innerRingImage = numpy.zeros(self.subap.shape)
+        self.innerRingImage[self.innerRing] = self.image[self.innerRing]
+        self.outerRingImage = numpy.zeros(self.subap.shape)
+        self.outerRingImage[self.outerRing] = self.image[self.outerRing]
 
 
     def plotIntensities(self, ax=None):
@@ -180,6 +196,189 @@ class WFS_Frame( object ):
         ax.figure.show()
 
         
+class DataLogger( object ):
+    def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
+                 sqlCursor=None):
+        self.dir = directory
+        self.CDMS_BaseDir = CDMS_BaseDir
+        self.CDMS_ConfigDir = CDMS_ConfigDir
+        self.RTC_Delay = RTC_Delay
+        self.ApertureDiameter = 8.0
+        self.WFS_Frame = WFS_Frame()
+        self.sqlCursor = sqlCursor
+
+    def loadData(self):
+        self.header = pyfits.getheader(self.dir+'/CIAO_LOOP_0001.fits')
+        self.CIAO_ID = self.header.get("ESO OCS SYS ID")
+        data = pyfits.getdata(self.dir+'/CIAO_LOOP_0001.fits')
+        self.Intensities = data.field('Intensities')
+        self.Gradients = data.field('Gradients')
+        self.HODM = data.field('HODM_Positions')
+        self.TTM = data.field('ITTM_Positions')
+        self.FrameCounter = data.field('FrameCounter')
+        self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
+                                     '%Y-%m-%dT%H:%M:%S'))
+        self.time = data.field('Seconds')+data.field('USeconds')/100000.0
+        self.time -= self.time[0]
+        self.loopRate = self.header.get('ESO AOS LOOP RATE')
+        self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
+        self.S2M = pyfits.getdata(self.dir+'/RecnOptimiser.S2M_0001.fits')
+        self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+ 
+                          'RecnOptimiser.ModalBasis.fits', ignore_missing_end=True)
+        self.HOIM = pyfits.getdata(self.dir+'/RecnOptimiser.HO_IM_0001.fits', ignore_missing_end=True)
+        self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                    'RecnOptimiser.TT2HO.fits', ignore_missing_end=True)
+        self.iTT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                    'RecnOptimiser.ITT2HO.fits', ignore_missing_end=True)
+        self.CM = pyfits.getdata(self.dir+'/Recn.REC1.CM_0001.fits', ignore_missing_end=True)
+        self.CM /= self.controlGain
+        self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
+        self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+
+                                    'RecnOptimiser.TTM2Z.fits', ignore_missing_end = True)
+        self.Z2DM = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                   'RecnOptimiser.Z2DM.fits', ignore_missing_end=True)
+        self.NZernikes = self.Z2DM.shape[1]
+        self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(self.NZernikes)])
+        #self.DM2Z = linalg.pinv(self.Z2DM)
+        self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                   'RecnOptimiser.DM2Z.fits', ignore_missing_end=True)
+        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
+    
+    def addToDatabase(self):
+        if self.sqlCursor == None:
+            return
+        sqlCommand = "SELECT * FROM CIAO_%d_DataLoggers WHERE TIMESTAMP = %.1f" % (self.CIAO_ID, 
+                      self.startTime)
+        self.sqlCursor.execute(sqlCommand)
+        result = self.sqlCursor.fetchall()
+        if len(result) == 0:
+            values = {}
+            values['timestamp'] = self.startTime
+            values['directory'] = self.dir
+            values['asm_seeing'] = self.header.get('ESO TEL AMBI FWHM')
+            values['avc_state'] = self.header.get('ESO AOS AVC LOOP ST') == True
+            values['cm_modes'] = self.header.get('ESO AOS CM MODES CONTROLLED')
+            values['wfs_geom'] = self.header.get('ESO AOS GEOM NAME')
+            values['gain'] = self.header.get('ESO AOS GLOBAL GAIN')
+            values['awf_enable'] = self.header.get('ESO AOS HOCTR AWF ENABLE')
+            values['garbage_gain'] = self.header.get('ESO AOS HOCTR GARBAGE GAIN')
+            values['ki'] = self.header.get('ESO AOS HOCTR KI')
+            values['kt'] = self.header.get('ESO AOS HOCTR KT')
+            values['pra_enable'] = self.header.get('ESO AOS HOCTR PRA ENABLE')
+            values['pra_gain'] = self.header.get('ESO AOS HOCTR PRA GAIN')
+            values['sma_enable'] = self.header.get('ESO AOS HOCTR SMA ENABLE')
+            values['sma_high'] = self.header.get('ESO AOS HOCTR SMA HIGH')
+            values['sma_iterations'] = self.header.get('ESO AOS HOCTR SMA ITERATIONS')
+            values['sma_low'] = self.header.get('ESO AOS HOCTR SMA LOW')
+            values['tt_ki'] = self.header.get('ESO AOS HOCTR TT KI')
+            values['tt_kt'] = self.header.get('ESO AOS HOCTR TT KT')
+            values['looprate'] = self.header.get('ESO AOS LOOP RATE')
+            values['tt_loop_state'] = self.header.get('ESO AOS TT LOOP ST')
+            values['ttx_refpos'] = self.header.get('ESO AOS TTM REFPOS X')
+            values['tty_refpos'] = self.header.get('ESO AOS TTM REFPOS Y')
+            values['vib_sr'] = self.header.get('ESO AOS VIB SR')
+            values['wfs_mode'] = self.header.get('ESO AOS WFS MODE')
+            values['im_trk_mode'] = self.header.get('ESO OCS IM TRK MODE')
+            values['alt'] = self.header.get('ESO TEL ALT')
+            values['az'] = self.header.get('ESO TEL AZ')
+            values['dit'] = self.header.get('ESO DET DIT')
+            values['derot_enc'] = self.header.get('ESO INS DROT ENC')
+            values['filt_enc'] = self.header.get('ESO INS FILT1 ENC')
+            values['msel_enc'] = self.header.get('ESO INS MSEL ENC')
+            values['msel_name'] = self.header.get('ESO INS MSEL NAME')
+            values['pmtil_enc'] = self.header.get('ESO INS PMTIL ENC')
+            values['pmtip_enc'] = self.header.get('ESO INS PMTIP ENC')
+            values['fldlx'] = self.header.get('ESO INS FLDL X')
+            values['fldly'] = self.header.get('ESO INS FLDL Y')
+            values['fsm_a_u'] = self.header.get('ESO STS FSM1 GUIDE U')
+            values['fsm_a_w'] = self.header.get('ESO STS FSM1 GUIDE W')
+            values['fsm_a_x'] = self.header.get('ESO STS FSM1 POSX')
+            values['fsm_a_y'] = self.header.get('ESO STS FSM1 POSY')
+            values['fsm_b_u'] = self.header.get('ESO STS FSM2 GUIDE U')
+            values['fsm_b_w'] = self.header.get('ESO STS FSM2 GUIDE W')
+            values['fsm_b_x'] = self.header.get('ESO STS FSM2 POSX')
+            values['fsm_b_y'] = self.header.get('ESO STS FSM2 POSY')
+            values['vcm_a_u'] = self.header.get('ESO STS VCM1 GUIDE U')
+            values['vcm_a_w'] = self.header.get('ESO STS VCM1 GUIDE W')
+            values['vcm_a_x'] = self.header.get('ESO STS VCM1 POSX')
+            values['vcm_a_y'] = self.header.get('ESO STS VCM1 POSY')
+            values['vcm_b_u'] = self.header.get('ESO STS VCM2 GUIDE U')
+            values['vcm_b_w'] = self.header.get('ESO STS VCM2 GUIDE W')
+            values['vcm_b_x'] = self.header.get('ESO STS VCM2 POSX')
+            values['vcm_b_y'] = self.header.get('ESO STS VCM2 POSY')
+            values['m10'] = self.header.get('ESO STS M10 POSANG')
+            values['rhum'] = self.header.get('ESO TEL AMBI RHUM')
+            values['temp'] = self.header.get('ESO TEL AMBI TEMP')
+            values['theta0'] = self.header.get('ESO TEL AMBI THETA0')
+            values['winddir'] = self.header.get('ESO TEL AMBI WINDDIR')
+            values['windsp'] = self.header.get('ESO TEL AMBI WINDSP')
+            values['prltic'] = self.header.get('ESO TEL PRLTIC')
+            values['pup_trk'] = self.header.get('ESO PUP TRK ST')
+                
+            format_str= """INSERT INTO CIAO_"""+str(self.CIAO_ID)+"""_DataLoggers (TIMESTAMP, DIRECTORY, 
+                 ASM_SEEING, AVC_STATE, CM_MODES, WFS_GEOM, GAIN,
+                 HOCTR_AWF_ENABLE, HOCTR_GARBAGE_GAIN, HOCTR_KI, HOCTR_KT, 
+                 HOCTR_PRA_ENABLE, HOCTR_PRA_GAIN, HOCTR_SMA_ENABLE, HOCTR_SMA_HIGH,
+                 HOCTR_SMA_ITERATIONS, HOCTR_SMA_LOW, HOCTR_TT_KI, HOCTR_TT_KT,
+                 LOOPRATE, TT_LOOP_STATE, TTX_REFPOS, TTY_REFPOS, VIB_SR, WFS_MODE,
+                 IM_TRK_MODE, ALT, AZ, DIT, DROT_ENC, FILT_ENC, MSEL_ENC, MSEL_NAME,
+                 PMTIL_ENC, PMTIP_ENC, FLDLX, FLDLY, FSM_A_U, FSM_A_W, FSM_A_X, FSM_A_Y,
+                 FSM_B_U, FSM_B_W, FSM_B_X, FSM_B_Y, VCM_A_U, VCM_A_W, VCM_A_X, VCM_A_Y,
+                 VCM_B_U, VCM_B_W, VCM_B_X, VCM_B_Y, M10_POSANG, RHUM, TEMP, THETA0, 
+                 WINDDIR, WINDSP, PRLTIC, PUP_TRK)
+                 VALUES ('{timestamp}', '{directory}', '{asm_seeing}',
+                 '{avc_state}', '{cm_modes}', 
+                 '{wfs_geom}', '{gain}', '{awf_enable}', '{garbage_gain}', '{ki}',
+                 '{kt}', '{pra_enable}', '{pra_gain}', '{sma_enable}', '{sma_high}',
+                 '{sma_iterations}', '{sma_low}', '{tt_ki}', '{tt_kt}', '{looprate}',
+                 '{tt_loop_state}', '{ttx_refpos}', '{tty_refpos}', '{vib_sr}',
+                 '{wfs_mode}', '{im_trk_mode}', '{alt}', '{az}', '{dit}', '{derot_enc}',
+                 '{filt_enc}', '{msel_enc}', '{msel_name}', '{pmtil_enc}', '{pmtip_enc}',
+                 '{fldlx}', '{fldly}', '{fsm_a_u}', '{fsm_a_w}', '{fsm_a_x}', '{fsm_a_y}',
+                 '{fsm_b_u}', '{fsm_b_w}', '{fsm_b_x}', '{fsm_b_y}', '{vcm_a_u}',
+                 '{vcm_a_w}', '{vcm_a_x}', '{vcm_a_y}', '{vcm_b_u}', '{vcm_b_w}',
+                 '{vcm_b_x}', '{vcm_b_y}', '{m10}', '{rhum}', '{temp}', '{theta0}',
+                 '{winddir}', '{windsp}', '{prltic}', '{pup_trk}');"""
+                
+            sqlCommand = format_str.format(timestamp=values['timestamp'],directory=values['directory'],
+                 asm_seeing=values['asm_seeing'], avc_state=values['avc_state'], 
+                 cm_modes=values['cm_modes'],
+                 wfs_geom=values['wfs_geom'], gain=values['gain'],
+                 awf_enable=values['awf_enable'], garbage_gain=values['garbage_gain'],
+                 ki=values['ki'], kt=values['kt'], pra_enable=values['pra_enable'],
+                 pra_gain=values['pra_gain'], sma_enable=values['sma_enable'],
+                 sma_high=values['sma_high'], sma_iterations=values['sma_iterations'],
+                 sma_low=values['sma_low'], tt_ki=values['tt_ki'],
+                 tt_kt=values['tt_kt'], looprate=values['looprate'],
+                 tt_loop_state=values['tt_loop_state'], ttx_refpos=values['ttx_refpos'],
+                 tty_refpos=values['tty_refpos'], vib_sr=values['vib_sr'],
+                 wfs_mode=values['wfs_mode'], im_trk_mode=values['im_trk_mode'],
+                 alt=values['alt'], az=values['az'], dit=values['dit'],
+                 derot_enc=values['derot_enc'], filt_enc=values['filt_enc'],
+                 msel_enc=values['msel_enc'], msel_name=values['msel_name'],
+                 pmtil_enc=values['pmtil_enc'], pmtip_enc=values['pmtip_enc'],
+                 fldlx=values['fldlx'], fldly=values['fldly'], fsm_a_u=values['fsm_a_u'],
+                 fsm_a_w=values['fsm_a_w'], fsm_a_x=values['fsm_a_x'],
+                 fsm_a_y=values['fsm_a_y'], fsm_b_u=values['fsm_b_u'],
+                 fsm_b_w=values['fsm_b_w'], fsm_b_x=values['fsm_b_x'],
+                 fsm_b_y=values['fsm_b_y'], vcm_a_u=values['vcm_a_u'],
+                 vcm_a_w=values['vcm_a_w'], vcm_a_x=values['vcm_a_x'],
+                 vcm_a_y=values['vcm_a_y'], vcm_b_u=values['vcm_b_u'],
+                 vcm_b_w=values['vcm_b_w'], vcm_b_x=values['vcm_b_x'],
+                 vcm_b_y=values['vcm_b_y'], m10=values['m10'], rhum=values['rhum'],
+                 temp=values['temp'], theta0=values['theta0'], winddir=values['winddir'],
+                 windsp=values['windsp'], prltic=values['prltic'], pup_trk=values['pup_trk'])
+            
+            self.sqlCursor.execute(sqlCommand)
+
+    def calculatePhotometricPupilOffset(self):
+        self.WFS_Frame.generateIntensityImage(intensities = numpy.mean(self.Intensities, axis=0))
+        self.innerRing = numpy.array(center_of_mass(self.WFS_Frame.innerRingImage)) - \
+                              numpy.array([4.0, 4.0])
+        self.outerRing = numpy.array(center_of_mass(self.WFS_Frame.outerRingImage)) - \
+                              numpy.array([4.0, 4.0])
+
+
 
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
@@ -208,6 +407,8 @@ class CircularBuffer( object ):
         self.ApertureDiameter = 8.0
         self.r0 = self.LambdaSeeing/self.ReferenceSeeing
         self.CIAO_ID = self.header.get("ESO OCS SYS ID")
+        self.Alt = self.header.get("ESO TEL ALT")
+        self.Az = self.header.get("ESO TEL AZ")
         if S2M != None:
             self.S2M = pyfits.getdata(S2M)
         else:
@@ -224,8 +425,11 @@ class CircularBuffer( object ):
         if TT2HO != None:
             self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+TT2HO, 
                                         ignore_missing_end=True)
+            self.iTT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                        'RecnOptimiser.ITT2HO.fits', ignore_missing_end=True)
         else:
             self.TT2HO = None
+            self.iTT2HO = None
         if CM != None:
             self.CM = pyfits.getdata(CM, ignore_missing_end=True)
             self.CM /= self.controlGain
@@ -636,6 +840,14 @@ class CircularBuffer( object ):
         self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn])/numpy.mean(ReferenceNoise[self.ZIn]))
         #self.ZPowerNoise = Reference * self.WFSNoise**2.0
         self.ZPowerNoise = self.WFSNoise**2.0 * numpy.ones([self.ZPowerFrequencies.shape[0],1]).dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)]))/numpy.max(self.ZPowerFrequencies)
+
+    def computeTTResiduals(self):
+        TTR = []
+        for frame in self.Gradients:
+            tip = numpy.mean(frame[0::2])
+            tilt = numpy.mean(frame[1::2])
+            TTR.append([tip, tilt])
+        self.TTResiduals = numpy.array(TTR)
 
 def ComputeIntegral(dFModel, F, dt):
     Integrant = dFModel * numpy.abs(1.0 - numpy.cos(2.0*numpy.pi*F*dt))
@@ -1458,9 +1670,13 @@ class pupil( object ):
         self.y = y
 
 class deformableMirror( object ):
-    def __init__(self, parent):
+    def __init__(self, parent=None, IFFile=None):
         self.nActuators = 60
-        self.influenceFunctions = pyfits.getdata(parent.datadir+'IF_cube.fits')
+        if IFFile != None:
+            self.influenceFunctions = pyfits.getdata(IFFile)
+        else:
+            self.influenceFunctions = pyfits.getdata(parent.datadir+'IF_cube.fits')
+        self.influenceFunctions[numpy.isnan(self.influenceFunctions)] = 0.0
         nx = len(self.influenceFunctions[0][0])
         ny = len(self.influenceFunctions[0])
         xcoords = numpy.linspace(-888.0, 888.0, nx)
@@ -1470,6 +1686,7 @@ class deformableMirror( object ):
         for inflfunc in self.influenceFunctions:
             self.interpFunctions.append(interp.interp2d(xcoords, ycoords,
                             inflfunc, kind='cubic'))
+
         
     def setMirror(self, actPos):
         self.actuatorPositions = actPos
@@ -1620,10 +1837,10 @@ class detector( object ):
             #intensity = numpy.zeros((nPixPoints, nPixPoints))
             #phase = numpy.zeros((nPixPoints, nPixPoints))
             i = location
-            for x in numpy.linspace(coord[0]-delta, coord[0]+delta, 
+            for x in numpy.linspace(coord[0][0]-delta, coord[0][0]+delta, 
                     num=int(round(FWHM_k))):
                 j = location
-                for y in numpy.linspace(coord[1]-delta, coord[1]+delta, 
+                for y in numpy.linspace(coord[0][1]-delta, coord[0][1]+delta, 
                         num=int(round(FWHM_k))):
                     flux[j][i] = numpy.complex(self.parent.pupil.calculateFlux(x, y),
                             self.parent.calcWaveFront(x, y))
@@ -1641,8 +1858,8 @@ class detector( object ):
                 if count in [8, 10, 15]:
                     extract.append(image)
                     count += 1
-            xc = coord[0]+gridx
-            yc = coord[1]+gridy
+            xc = coord[0][0]+gridx
+            yc = coord[0][1]+gridy
             inviewx = (self.xpix > numpy.min(xc)) & (self.xpix <= numpy.max(xc))
             inviewy = (self.ypix > numpy.min(yc)) & (self.ypix <= numpy.max(yc))
             weightX = 0.0
@@ -1830,7 +2047,7 @@ class waveFront( object ):
         self.zernikes = []
         self.nZern = nZern
         for i in numpy.arange(2, self.nZern):
-            self.zernikes.append([i, 0.0])
+            self.zernikes.append(zernikeMode(i, 0.0))
 
         #self.tip = zernikeMode(2, 0.00)
         #self.tilt = zernikeMode(3, 0.00)

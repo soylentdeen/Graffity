@@ -13,9 +13,25 @@ def doFit(centroids, alt, az, u, w):
     fitPoints = x.T.dot(A.T)
     return fitPoints, x
 
+def doAltAzFit(centroids, alt, az):
+    #Ax = b
+    A = numpy.matrix(numpy.array([numpy.ones(len(az)), alt, az]).T)
+    x = A.I.dot(centroids)
+    fitPoints = x.T.dot(A.T)
+    return fitPoints, x
+
 fig0 = pyplot.figure(0)
 fig0.clear()
-ax0 = fig0.add_axes([0.1, 0.1, 0.8, 0.8])
+ax01 = fig0.add_axes([0.1, 0.1, 0.4, 0.4])
+ax02 = fig0.add_axes([0.1, 0.5, 0.4, 0.4])
+ax03 = fig0.add_axes([0.5, 0.1, 0.4, 0.4])
+ax04 = fig0.add_axes([0.5, 0.5, 0.4, 0.4])
+fig1 = pyplot.figure(1)
+fig1.clear()
+ax11 = fig1.add_axes([0.1, 0.1, 0.4, 0.4])
+ax12 = fig1.add_axes([0.1, 0.5, 0.4, 0.4])
+ax13 = fig1.add_axes([0.5, 0.1, 0.4, 0.4])
+ax14 = fig1.add_axes([0.5, 0.5, 0.4, 0.4])
 
 CIAO_dir = '/home/cdeen/Data/CIAO/JanComm/2017-01-08_'
 CDMS_Dir = '/home/cdeen/Data/CIAO/DATABASE/UT4/OFFAXIS/Matrices/Common/'
@@ -31,7 +47,7 @@ VCMW = {}
 
 startTime = time.mktime(time.strptime('2016-09-21T23:00:00', '%Y-%m-%dT%H:%M:%S'))
 
-for ciao in [1, 2, 3, 4]:
+for ciao, ax in zip([1, 2, 3, 4], [ax11, ax12, ax13, ax14]):
     CIAO_datadir = CIAO_dir+str(ciao)+'/'
     az = []
     alt = []
@@ -55,23 +71,31 @@ for ciao in [1, 2, 3, 4]:
             t.append(tm)
             alt.append(CB.header.get('ESO TEL ALT'))
             az.append(CB.header.get('ESO TEL AZ'))
-            vcmu.append(CB.header.get('ESO STS VCM2 POSX'))
-            vcmw.append(CB.header.get('ESO STS VCM2 POSY'))
+            vcmu.append(CB.header.get('ESO STS VCM2 GUIDE U'))
+            vcmw.append(CB.header.get('ESO STS VCM2 GUIDE W'))
     Time[ciao] = numpy.array(t)
     Flux[ciao] = numpy.array(flux) - numpy.array([1.0, 1.0])
     Alt[ciao] = numpy.array(alt)
     Az[ciao] = numpy.array(az)
     VCMU[ciao] = numpy.array(vcmu)
     VCMW[ciao] = numpy.array(vcmw)
+    image.plotIntensities(ax=ax)
 
 
-for ciao in [1, 2, 3, 4]:
+for ciao, ax in zip([1, 2, 3, 4], [ax01, ax02, ax03, ax04]):
     fit, matrix = doFit(Flux[ciao], Alt[ciao], Az[ciao], VCMU[ciao], VCMW[ciao])
-    ax0.clear()
-    ax0.scatter(Flux[ciao][:,0], Flux[ciao][:,1], color = 'b')
-    ax0.scatter(fit[0,:], fit[1,:], color = 'g')
-    fig0.show()
-    input()
+    #fit, matrix = doAltAzFit(Flux[ciao], Alt[ciao], Az[ciao])
+    ax.clear()
+    ax.scatter(Flux[ciao][:,0], Flux[ciao][:,1], color = 'b')
+    ax.scatter(fit[0,:], fit[1,:], color = 'g')
+    ax.text(0.1, 0.9, 'UT%d'%ciao, transform = ax.transAxes)
+
+fig0.suptitle("Pupil Decenter")
+fig0.show()
+
+fig1.suptitle("Pupil Illumination")
+fig1.savefig("Pupil.png")
+fig0.savefig("decenter.png")
 
 #for ciao in [1, 2, 3, 4]:
 #    ax0.clear()

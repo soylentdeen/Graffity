@@ -32,6 +32,8 @@ dSRs[2] = []
 dSRs[3] = []
 timestamp = []
 
+AcqCam
+
 out = open('strehlRatios.dat', 'w')
 
 for f in files[:16]:
