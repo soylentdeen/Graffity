@@ -1,7 +1,8 @@
 import scipy
 import sqlite3
+import os
 
-connection = sqlite3.connect('/data/cdeen/Data/CIAO/SQL/Dataloggers.db')
+connection = sqlite3.connect(os.environ.get('CIAO_SQL')+'Dataloggers.db')
 
 cursor = connection.cursor()
 

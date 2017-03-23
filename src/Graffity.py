@@ -200,6 +200,7 @@ class DataLogger( object ):
     def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
                  sqlCursor=None):
         self.dir = directory
+        self.datadir = os.environ.get('CIAO_DATA')
         self.CDMS_BaseDir = CDMS_BaseDir
         self.CDMS_ConfigDir = CDMS_ConfigDir
         self.RTC_Delay = RTC_Delay
@@ -208,7 +209,7 @@ class DataLogger( object ):
         self.sqlCursor = sqlCursor
 
     def loadData(self):
-        self.header = pyfits.getheader(self.dir+'/CIAO_LOOP_0001.fits')
+        self.header = pyfits.getheader(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
         self.CIAO_ID = self.header.get("ESO OCS SYS ID")
         self.LambdaSeeing = 0.5e-6
         self.LambdaStrehl = 2.2e-6
@@ -216,7 +217,7 @@ class DataLogger( object ):
         self.L0 = numpy.inf
         self.ApertureDiameter = 8.0
         self.r0 = self.LambdaSeeing/self.ReferenceSeeing
-        data = pyfits.getdata(self.dir+'/CIAO_LOOP_0001.fits')
+        data = pyfits.getdata(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
         self.Intensities = data.field('Intensities')
         self.Gradients = data.field('Gradients')
         self.HODM = data.field('HODM_Positions')
@@ -228,15 +229,17 @@ class DataLogger( object ):
         self.time -= self.time[0]
         self.loopRate = self.header.get('ESO AOS LOOP RATE')
         self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
-        self.S2M = pyfits.getdata(self.dir+'/RecnOptimiser.S2M_0001.fits')
+        self.S2M = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.S2M_0001.fits')
         self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+ 
                           'RecnOptimiser.ModalBasis.fits', ignore_missing_end=True)
-        self.HOIM = pyfits.getdata(self.dir+'/RecnOptimiser.HO_IM_0001.fits', ignore_missing_end=True)
+        self.HOIM = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.HO_IM_0001.fits',
+                                   ignore_missing_end=True)
         self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                     'RecnOptimiser.TT2HO.fits', ignore_missing_end=True)
         self.iTT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                     'RecnOptimiser.ITT2HO.fits', ignore_missing_end=True)
-        self.CM = pyfits.getdata(self.dir+'/Recn.REC1.CM_0001.fits', ignore_missing_end=True)
+        self.CM = pyfits.getdata(self.datadir+self.dir+'/Recn.REC1.CM_0001.fits', 
+                                 ignore_missing_end=True)
         self.CM /= self.controlGain
         self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
         self.TTM2Z = pyfits.getdata(self.CDMS_BaseDir+self.CDMS_ConfigDir+
@@ -401,7 +404,8 @@ class DataLogger( object ):
         self.estimateStrehlRatio()
         self.computeTTResiduals()
 
-        if saveData:
+        if (saveData and numpy.isfinite(self.Strehl) and numpy.isfinite(self.Seeing) and
+                     numpy.isfinite(self.Tau0)):
             TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
             sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.3f, SEEING = %.3f, TAU0 = %.3f, TIP_RESIDUALS = %.2f, TILT_RESIDUALS = %.2f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, TTResid[0], TTResid[1], self.startTime)
             self.sqlCursor.execute(sqlCommand)
