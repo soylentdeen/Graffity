@@ -6,20 +6,21 @@ import Graffity
 import os
 from matplotlib import cm
 
-CDMS_BaseDir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg'
+CDMS_BaseDir = '/data/cdeen/CIAO_Commissioning/spcicfg'
 CDMS_ConfigDir = '/config/RTCDATA/CIAO/DEFAULT/'
+
 fig = pyplot.figure(0)
 ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
 ax.clear()
 
-database = '/home/cdeen/Data/CIAO/Dataloggers.db'
+database = '/data/cdeen/Data/CIAO/SQL/Dataloggers.db'
 
 connection = sqlite3.connect(database)
 
 cursor = connection.cursor()
 
 #Get Column Names
-command = "SELECT TIMESTAMP, FILENAME, ALT, AZ, PMTIP_ENC, PMTIL_ENC, STREHL, SEEING from CIAO_4_DataLoggers "
+command = "SELECT TIMESTAMP, DIRECTORY, ALT, AZ, PMTIP_ENC, PMTIL_ENC, STREHL, SEEING from CIAO_4_DataLoggers "
 cursor.execute(command)
 columns1 = cursor.fetchall()
 
@@ -31,8 +32,8 @@ az = []
 tip = []
 tilt = []
 for datalogger in columns1:
-    dirname = os.path.dirname(datalogger[1])
-    dl = Graffity.DataLogger(directory = dirname, CDMS_BaseDir=CDMS_BaseDir,
+    dl = Graffity.DataLogger(directory = datalogger[1], 
+                             CDMS_BaseDir=CDMS_BaseDir,
                              CDMS_ConfigDir=CDMS_ConfigDir)
     dl.loadData()
     dl.calculatePhotometricPupilOffset()
