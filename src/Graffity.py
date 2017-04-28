@@ -16,6 +16,7 @@ from scipy.ndimage.measurements import center_of_mass
 from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 import time
+from datetime import datetime
 
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
@@ -195,50 +196,179 @@ class WFS_Frame( object ):
         ax.matshow(self.image)
         ax.figure.show()
 
+class GRAVITY_Dual_Sci_P2VM( object ):
+    def __init__(self, fileBase = '', startTime=0.0):
+        self.filename = fileBase+'_dualscip2vmred.fits'
+        self.startTime = startTime
+        try:
+            self.header = pyfits.getheader(self.filename, ext=10)
+            self.data = pyfits.getdata(self.filename, ext=10)
+            self.getPupilMotion()
+        except:
+            pass
+
+    def getPupilMotion(self):
+        self.TIME = self.data.field('TIME')[::4]*1e-6+self.startTime
+        self.PUPIL_NSPOT = self.data.field('PUPIL_NSPOT')[::4]
+        self.PUPIL_X = {}
+        self.PUPIL_Y = {}
+        self.PUPIL_Z = {}
+        self.PUPIL_R = {}
+        self.PUPIL_U = {}
+        self.PUPIL_V = {}
+        self.PUPIL_W = {}
         
-class DataLogger( object ):
-    def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
-                 sqlCursor=None):
-        self.dir = directory
-        self.datadir = os.environ.get('CIAO_DATA')
-        self.CDMS_BaseDir = CDMS_BaseDir
-        self.CDMS_ConfigDir = CDMS_ConfigDir
-        self.RTC_Delay = RTC_Delay
-        self.ApertureDiameter = 8.0
-        self.WFS_Frame = WFS_Frame()
-        self.sqlCursor = sqlCursor
+        for UT in [1, 2, 3, 4]:
+            self.PUPIL_X[UT] = self.data.field('PUPIL_X')[UT-1::4]
+            self.PUPIL_Y[UT] = self.data.field('PUPIL_Y')[UT-1::4]
+            self.PUPIL_Z[UT] = self.data.field('PUPIL_Z')[UT-1::4]
+            self.PUPIL_R[UT] = self.data.field('PUPIL_R')[UT-1::4]
+            self.PUPIL_U[UT] = self.data.field('PUPIL_U')[UT-1::4]
+            self.PUPIL_V[UT] = self.data.field('PUPIL_V')[UT-1::4]
+            self.PUPIL_W[UT] = self.data.field('PUPIL_W')[UT-1::4]
+
+
+
+class GRAVITY_Dual_SciVis( object ):
+    def __init__(self, fileBase = ''):
+        self.filename = fileBase+'_dualscivis.fits'
+        try:
+            self.header = pyfits.getheader(self.filename)
+            self.data = pyfits.getdata(self.filename)
+        except:
+            pass
+
+class GRAVITY_AstroReduced( object ):
+    def __init__(self, fileBase = ''):
+        self.filename = fileBase+'_astroreduced.fits'
+        self.masterheader = pyfits.getheader(self.filename, ext=0)
+        self.RA = self.masterheader.get('RA')
+        self.DEC = self.masterheader.get('DEC')
+        HDUList = pyfits.open(self.filename)
+        self.data = []
+        self.headers = []
+        for HDU in HDUList:
+            if HDU.name == 'OI_FLUX':
+                self.data.append(HDU.data)
+                self.headers.append(HDU.header)
+        HDUList.close()
+
+class GRAVITY_Data( object ):
+    def __init__(self, fileBase='', UTS=[1,2,3,4]):
+        self.datadir = os.environ.get('GRAVITY_DATA')
+        self.fileBase = fileBase
+        self.UTS = UTS
+        #self.Dual_SciVis = GRAVITY_Dual_SciVis(fileBase=self.datadir+self.fileBase)
+        self.AstroReduced = GRAVITY_AstroReduced(fileBase=self.datadir+self.fileBase)
+        self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
+        self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase, startTime=self.startTime)
+        self.DITTimes = {}
+        self.SC_Fluxes = {}
+        self.FT_Fluxes = {}
+        self.Strehl = {}
+        self.Seeing = {}
+        self.ASM_Seeing = {}
+        for UT in self.UTS:
+            self.DITTimes[UT] = []
+            self.SC_Fluxes[UT] = []
+            self.FT_Fluxes[UT] = []
+            for d in self.AstroReduced.data:
+                self.DITTimes[UT].append(d.field('TIME')[UT-1::4]*1e-6+self.startTime)
+                self.SC_Fluxes[UT].append(d.field('TOTALFLUX_SC')[UT-1::4])
+                self.FT_Fluxes[UT].append(d.field('TOTALFLUX_FT')[UT-1::4])
+        
+
+    def plotReducedSCFluxes(self, ax=None):
+        ax.clear()
+        for i in self.UTS:
+            ax.plot(self.DITTimes[i], self.SC_Fluxes[i])
+        ax.figure.show()
+
+    def plotReducedFTFluxes(self, ax=None):
+        ax.clear()
+        for i in range(4):
+            ax.plot(self.DITTimes[i], self.FT_Fluxes[i])
+        ax.figure.show()
+
+    def addAOData(self, UT=0, Strehl = None, Seeing = None, ASM_Seeing = None):
+        if Strehl != None:
+            self.Strehl[UT] = Strehl
+        if Seeing != None:
+            self.Seeing[UT] = Seeing
+        if ASM_Seeing != None:
+            self.ASM_Seeing[UT] = ASM_Seeing
+
+    def __lt__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime < other.startTime
+        else:
+            return self.startTime < other
+
+    def __le__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime <= other.startTime
+        else:
+            return self.startTime <= other
+
+    def __gt__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime > other.startTime
+        else:
+            return self.startTime > other
+
+    def __ge__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime >= other.startTime
+        else:
+            return self.startTime >= other
+
+    def __eq__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime == other.startTime
+        else:
+            return self.startTime == other
+
+    def __ne__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime != other.startTime
+        else:
+            return self.startTime != other
+
+
+class Anamorph( object ):
+    def __init__(self, directory='', index=0):
+        self.datadir = os.environ.get('CIAO_DATA')+directory
+        self.CDMS_BaseDir = os.environ.get('CDMS_BASEDIR')
+        self.CDMS_ConfigDir = os.environ.get('CDMS_CONFIGDIR')
+        self.index = index
 
     def loadData(self):
-        self.header = pyfits.getheader(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
+        self.header = pyfits.getheader(self.datadir+'/CIAO_LOOP_%04d.fits'%self.index)
         self.CIAO_ID = self.header.get("ESO OCS SYS ID")
-        self.LambdaSeeing = 0.5e-6
-        self.LambdaStrehl = 2.2e-6
-        self.ReferenceSeeing = 1.0/(180.0*3600.0/numpy.pi)
-        self.L0 = numpy.inf
-        self.ApertureDiameter = 8.0
-        self.r0 = self.LambdaSeeing/self.ReferenceSeeing
-        data = pyfits.getdata(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
-        self.Intensities = data.field('Intensities')
-        self.Gradients = data.field('Gradients')
-        self.HODM = data.field('HODM_Positions')
-        self.TTM = data.field('ITTM_Positions')
-        self.FrameCounter = data.field('FrameCounter')
-        self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
+        loopData = pyfits.getdata(self.datadir+'/CIAO_LOOP_%04d.fits'%self.index)
+        self.Intensities = loopData.field('Intensities')
+        self.Gradients = loopData.field('Gradients')
+        self.HODM = loopData.field('HODM_Positions')
+        self.TTM = loopData.field('ITTM_Positions')
+        self.FrameCounter = loopData.field('FrameCounter')
+        self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'),
                                      '%Y-%m-%dT%H:%M:%S'))
-        self.time = data.field('Seconds')+data.field('USeconds')/100000.0
-        self.time -= self.time[0]
+        self.loopTime = loopData.field('Seconds')+loopData.field('USeconds')/100000.0
+        self.loopTime -= self.loopTime[0]
         self.loopRate = self.header.get('ESO AOS LOOP RATE')
         self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
-        self.S2M = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.S2M_0001.fits')
+        pixelData = pyfits.getdata(self.datadir+'/CIAO_PIXELS_%04d.fits'%self.index)
+        self.Pixels = pixelData.field('Pixels')
+        self.S2M = pyfits.getdata(self.datadir+'/RecnOptimiser.S2M_%04d.fits'%self.index)
         self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+ 
                           'RecnOptimiser.ModalBasis.fits', ignore_missing_end=True)
-        self.HOIM = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.HO_IM_0001.fits',
+        self.HOIM = pyfits.getdata(self.datadir+'/RecnOptimiser.HO_IM_%04d.fits'%self.index,
                                    ignore_missing_end=True)
         self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                     'RecnOptimiser.TT2HO.fits', ignore_missing_end=True)
         self.iTT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                     'RecnOptimiser.ITT2HO.fits', ignore_missing_end=True)
-        self.CM = pyfits.getdata(self.datadir+self.dir+'/Recn.REC1.CM_0001.fits', 
+        self.CM = pyfits.getdata(self.datadir+'/Recn.REC1.CM_%04d.fits'%self.index, 
                                  ignore_missing_end=True)
         self.CM /= self.controlGain
         self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
@@ -254,7 +384,169 @@ class DataLogger( object ):
         self.S2Z = self.DM2Z.dot(self.CM[:60])
         self.Z2S = linalg.pinv(self.S2Z)
         self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
+
+    def extractModulation(self):
+        self.modulatedFrames = numpy.append(numpy.diff(self.HODM, axis=0)[:,0] != 0, False)
+        mean = numpy.mean(self.HODM[self.modulatedFrames==False], axis=0)
+        self.modulatedHODM = self.HODM - mean
+        mean = numpy.mean(self.Gradients[self.modulatedFrames==False], axis=0)
+        self.modulatedGradients = self.Gradients - mean
+
+    def extractIMsFromNoiseModulation(self, ax=None):
+        PERIOD = self.loopTime[self.modulatedFrames==True][-1]/(len(self.modulatedFrames==True)-1)
+        LOOPRATE = 1.0/PERIOD
+        fourierHODM = numpy.fft.fftshift(numpy.fft.fft(self.modulatedHODM[self.modulatedFrames==True]))
+        fourierGradients = numpy.fft.fftshift(numpy.fft.fft(self.modulatedGradients[self.modulatedFrames == True]))
+        #fourierHODM = numpy.sqrt(fourierHODM * numpy.conj(fourierHODM))
+        freq = numpy.fft.fftshift(numpy.fft.fftfreq(fourierHODM.shape[0], d=PERIOD))
+        ax.clear()
+        for H in fourierHODM.T:
+            ax.plot(freq, H)
+        ax.figure.show()
+        raw_input()
+        ax.clear()
+        for G in fourierGradients.T:
+            ax.plot(freq, G)
+        ax.figure.show()
+        raw_input()
+
+
+        
+class Anamorphose( object ):
+    def __init__(self, directory='', RTC_Delay=0.5e-3, sqlCursor=None):
+        self.dir = directory
+        self.datadir = os.environ.get('CIAO_DATA')
+        self.WFS_Frame = WFS_Frame()
+        self.sqlCursor = sqlCursor
+
+    def loadData(self, ax=None):
+        self.header = pyfits.getheader(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
+        self.CIAO_ID = self.header.get("ESO OCS SYS ID")
+        self.nMeasurements = self.header.get('ESO TPL NEXP')
+        self.Anamorphs = []
+        self.IMs = []
+        for i in range(self.nMeasurements):
+            self.Anamorphs.append(Anamorph(directory=self.dir, index=i+1))
+            self.Anamorphs[-1].loadData()
+            self.Anamorphs[-1].extractModulation()
+            self.IMs.append(self.Anamorphs[-1].extractIMsFromNoiseModulation(ax=ax))
+        """
+        self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
+                                     '%Y-%m-%dT%H:%M:%S'))
+        self.time = loopData.field('Seconds')+data.field('USeconds')/100000.0
+        self.time -= self.time[0]
+        self.loopRate = self.header.get('ESO AOS LOOP RATE')
+        self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
+        #"""
+
+class DataLogger( object ):
+    def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
+                 sqlCursor=None):
+        self.dir = directory
+        self.datadir = os.environ.get('CIAO_DATA')
+        self.CDMS_BaseDir = os.environ.get('CDMS_BASEDIR')
+        self.CDMS_ConfigDir = os.environ.get('CDMS_CONFIGDIR')
+        self.MATLAB_CIAO_DATABASE = os.environ.get('MATLAB_CIAO_DATABASE')
+        #self.CDMS_BaseDir = CDMS_BaseDir
+        #self.CDMS_ConfigDir = CDMS_ConfigDir
+        self.RTC_Delay = RTC_Delay
+        self.ApertureDiameter = 8.0
+        self.WFS_Frame = WFS_Frame()
+        self.sqlCursor = sqlCursor
+
+    def loadData(self):
+        self.header = pyfits.getheader(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
+        self.CIAO_ID = self.header.get("ESO OCS SYS ID")
+        self.cimdatDir = self.MATLAB_CIAO_DATABASE+'UT%d/OFFAXIS/Matrices/Laptop/' % self.CIAO_ID
+        self.LambdaSeeing = 0.5e-6
+        self.LambdaStrehl = 2.2e-6
+        self.Arcsec = 180.0*3600.0/numpy.pi
+        self.ReferenceSeeing = 1.0/self.Arcsec
+        self.L0 = numpy.inf
+        self.ApertureDiameter = 8.0
+        self.r0 = self.LambdaSeeing/self.ReferenceSeeing
+        data = pyfits.getdata(self.datadir+self.dir+'/CIAO_LOOP_0001.fits')
+        self.Intensities = data.field('Intensities')
+        self.Gradients = data.field('Gradients')
+        self.HODM = data.field('HODM_Positions')
+        self.TTM = data.field('ITTM_Positions')
+        self.FrameCounter = data.field('FrameCounter')
+        try:
+            self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
+                                     '%Y-%m-%dT%H:%M:%S'))
+        except:
+            headerTime = self.dir.split('/')
+            self.startTime = time.mktime(time.strptime(headerTime[2]+'T'+headerTime[-1].split('-')[1], 
+                                     '%Y-%m-%dT%H%M%S'))
+        self.time = data.field('Seconds')+data.field('USeconds')/100000.0
+        self.time -= self.time[0]
+        self.loopRate = self.header.get('ESO AOS LOOP RATE')
+        self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
+        try:
+            self.S2M = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.S2M_0001.fits')
+        except:
+            self.S2M = pyfits.getdata(self.datadir+self.dir+'/CLMatrixOptimiser.S2M_0001.fits')
+        self.ModalBasis = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+ 
+                          'RecnOptimiser.ModalBasis.fits', ignore_missing_end=True)
+        try:
+            self.HOIM = pyfits.getdata(self.datadir+self.dir+'/RecnOptimiser.HO_IM_0001.fits',
+                                   ignore_missing_end=True)
+        except:
+            self.HOIM = pyfits.getdata(self.datadir+self.dir+'/CLMatrixOptimiser.HO_IM_0001.fits',
+                                   ignore_missing_end=True)
+        self.TT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                    'RecnOptimiser.TT2HO.fits', ignore_missing_end=True)
+        self.iTT2HO = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                    'RecnOptimiser.ITT2HO.fits', ignore_missing_end=True)
+        self.CM = pyfits.getdata(self.datadir+self.dir+'/Recn.REC1.CM_0001.fits', 
+                                 ignore_missing_end=True)
+        if self.controlGain > 0.0:
+            self.CM /= self.controlGain
+        self.CM[:60,:] += self.TT2HO.dot(self.CM[60:,:])
+        self.TTM2Z = pyfits.getdata(self.cimdatDir+
+                                    'cimdatTTM2Z.fits', ignore_missing_end = True)
+        self.Z2DM = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                   'RecnOptimiser.Z2DM.fits', ignore_missing_end=True)
+        self.NZernikes = self.Z2DM.shape[1]
+        self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(self.NZernikes)])
+        #self.DM2Z = linalg.pinv(self.Z2DM)
+        self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
+                                   'RecnOptimiser.DM2Z.fits', ignore_missing_end=True)
+        self.S2Z = self.DM2Z.dot(self.CM[:60])
+        self.Z2S = linalg.pinv(self.S2Z)
+        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
+        try:
+            self.REFSLP = pyfits.getdata(self.datadir+self.dir+'/Acq.DET1.REFSLP_0001.fits')
+        except:
+            self.REFSLP = None
     
+    def __lt__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime < other.startTime
+
+    def __le__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime <= other.startTime
+
+    def __gt__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime > other.startTime
+
+    def __ge__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime >= other.startTime
+
+    def __eq__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime == other.startTime
+
+    def __ne__(self, other):
+        if hasattr(other, startTime):
+            return self.startTime != other.startTime
+
+    def getRefSlopeZernikes(self):
+        return self.S2Z.dot(self.REFSLP.T)
+
     def addToDatabase(self):
         if self.sqlCursor == None:
             return
@@ -389,7 +681,59 @@ class DataLogger( object ):
         self.outerRing = numpy.array(center_of_mass(self.WFS_Frame.outerRingImage)) - \
                               numpy.array([4.0, 4.0])
 
-    def computeStrehl(self, saveData=False):
+    def computePSFPerformance(self):
+        self.FrequencyResolution = 0.5
+        self.synchronizeData()
+        self.zernikeSpace()
+        #self.Piston = self.self.HODM    - don't have piston matrices loaded in yet...
+
+
+    def computeStrehlSegments(self, DITTimes=[]):
+        t1 = self.startTime
+        t2 = self.startTime
+        oldGradients = self.Gradients
+        oldTTM = self.TTM
+        oldHODM = self.HODM
+        strehl = []
+        seeing = []
+        for t in DITTimes:
+            t1 = t2
+            t2 = t
+            self.TTM = oldTTM
+            self.HODM = oldHODM
+            self.Gradients = oldGradients
+            self.clipData(startTime=t1, stopTime=t2)
+            if len(self.TTM) > 2000:
+                print len(self.TTM)
+                self.synchronizeData()
+                self.zernikeSpace()
+                self.computePSD(source='ZSlopes')
+                self.computePSD(source='ZCommands')
+                self.AORejectionFunction()
+                self.combinePSDs()
+                self.computeKolmogorovCovar()
+                self.zernikePropagation()
+                self.noiseEvaluation()
+                self.seeingEstimation()
+                self.computeSpectralSlope((3, 15))
+                self.estimateStrehlRatio()
+                strehl.append(self.Strehl)
+                seeing.append(self.Seeing*self.Arcsec)
+        return numpy.array(strehl), numpy.array(seeing)
+
+    def clipData(self, startTime=0.0, stopTime=0.0):
+        frames = (self.time+self.startTime > startTime) & (self.time+self.startTime < stopTime)
+        self.TTM = self.TTM[frames, :]
+        self.Gradients = self.Gradients[frames,:]
+        self.HODM = self.HODM[frames, :]
+
+    def computeStrehl(self, saveData=False, skipLongRecords=False):
+        if (skipLongRecords and(self.HODM.shape[0] > 30000)):
+            self.Seeing = numpy.nan
+            self.Strehl = numpy.nan
+            self.Arcsec = 1.0
+            print "Skipping long record!"
+            return
         self.synchronizeData()
         self.zernikeSpace()
         self.computePSD(source='ZSlopes')
@@ -402,20 +746,16 @@ class DataLogger( object ):
         self.seeingEstimation()
         self.computeSpectralSlope((3,15))
         self.estimateStrehlRatio()
-        self.computeTTResiduals()
 
         if (saveData and numpy.isfinite(self.Strehl) and numpy.isfinite(self.Seeing) and
                      numpy.isfinite(self.Tau0)):
-            TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
-            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.3f, SEEING = %.3f, TAU0 = %.3f, TIP_RESIDUALS = %.2f, TILT_RESIDUALS = %.2f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, TTResid[0], TTResid[1], self.startTime)
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.4f, SEEING = %.4f, TAU0 = %.4f, TERR = %.4f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, self.TemporalError, self.startTime)
             self.sqlCursor.execute(sqlCommand)
 
-
     def synchronizeData(self):
-        self.TTM = self.TTM[:-3,:]
-        #self.TTM = self.TTM[2:-1,:]
-        self.HODM = self.HODM[2:-1,:]
-        self.Gradients = self.Gradients[3:,:]
+        self.TTM = self.TTM[:-4,:]
+        self.HODM = self.HODM[2:-2,:]
+        self.Gradients = self.Gradients[3:-1,:]
         
         self.TTM -= numpy.mean(self.TTM, axis=0)
         self.HODM -= numpy.mean(self.HODM, axis=0)
@@ -555,7 +895,6 @@ class DataLogger( object ):
         self.PropagatedKolmogorovCovar = self.ZernikePropagation.dot(self.KolmogorovCovar).dot(self.ZernikePropagation.T)
 
     def seeingEstimation(self, ax=None):
-        self.Arcsec = 180.0*3600.0/numpy.pi
         self.LocalNoiseFactor = numpy.abs(self.RTC/(1.0+self.WFS*self.RTC))**2.0
         self.LocalAtmosphereFactor = numpy.abs((1.0+self.WFS*self.RTC)/(self.WFS*self.RTC))**2.0
         self.A=self.ZPowerCommands.T-numpy.array([self.ZPowerNoise[n,:] * self.LocalNoiseFactor[n] for n 
@@ -672,13 +1011,18 @@ class DataLogger( object ):
         #self.ZPowerNoise = Reference * self.WFSNoise**2.0
         self.ZPowerNoise = self.WFSNoise**2.0 * numpy.ones([self.ZPowerFrequencies.shape[0],1]).dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)]))/numpy.max(self.ZPowerFrequencies)
 
-    def computeTTResiduals(self):
+    def computeTTResiduals(self, saveData=False):
         TTR = []
         for frame in self.Gradients:
             tip = numpy.mean(frame[0::2])
             tilt = numpy.mean(frame[1::2])
             TTR.append([tip, tilt])
         self.TTResiduals = numpy.array(TTR)
+
+        if saveData:
+            TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIP_RESIDUALS = %.4f, TILT_RESIDUALS = %.4f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, TTResid[0], TTResid[1], self.startTime)
+            self.sqlCursor.execute(sqlCommand)
 
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
