@@ -17,6 +17,7 @@ from scipy.ndimage.filters import maximum_filter
 from scipy.ndimage.morphology import generate_binary_structure, binary_erosion
 import time
 from datetime import datetime
+from astropy import time as aptime
 
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
@@ -208,7 +209,7 @@ class GRAVITY_Dual_Sci_P2VM( object ):
             pass
 
     def getPupilMotion(self):
-        self.TIME = self.data.field('TIME')[::4]*1e-6+self.startTime
+        self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
         self.PUPIL_NSPOT = self.data.field('PUPIL_NSPOT')[::4]
         self.PUPIL_X = {}
         self.PUPIL_Y = {}
@@ -260,7 +261,8 @@ class GRAVITY_Data( object ):
         self.UTS = UTS
         #self.Dual_SciVis = GRAVITY_Dual_SciVis(fileBase=self.datadir+self.fileBase)
         self.AstroReduced = GRAVITY_AstroReduced(fileBase=self.datadir+self.fileBase)
-        self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
+        #self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
+        self.startTime = aptime.Time(self.AstroReduced.masterheader.get('ESO PCR ACQ START'))
         self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase, startTime=self.startTime)
         self.DITTimes = {}
         self.SC_Fluxes = {}
@@ -273,7 +275,7 @@ class GRAVITY_Data( object ):
             self.SC_Fluxes[UT] = []
             self.FT_Fluxes[UT] = []
             for d in self.AstroReduced.data:
-                self.DITTimes[UT].append(d.field('TIME')[UT-1::4]*1e-6+self.startTime)
+                self.DITTimes[UT].append((d.field('TIME')[UT-1::4]*1e-6)/(24*3600.0)+self.startTime.mjd)
                 self.SC_Fluxes[UT].append(d.field('TOTALFLUX_SC')[UT-1::4])
                 self.FT_Fluxes[UT].append(d.field('TOTALFLUX_FT')[UT-1::4])
         
@@ -399,16 +401,17 @@ class Anamorph( object ):
         fourierGradients = numpy.fft.fftshift(numpy.fft.fft(self.modulatedGradients[self.modulatedFrames == True]))
         #fourierHODM = numpy.sqrt(fourierHODM * numpy.conj(fourierHODM))
         freq = numpy.fft.fftshift(numpy.fft.fftfreq(fourierHODM.shape[0], d=PERIOD))
-        ax.clear()
-        for H in fourierHODM.T:
-            ax.plot(freq, H)
-        ax.figure.show()
-        raw_input()
-        ax.clear()
-        for G in fourierGradients.T:
-            ax.plot(freq, G)
-        ax.figure.show()
-        raw_input()
+        if ax != None:
+            ax.clear()
+            for H in fourierHODM.T:
+                ax.plot(freq, H)
+            ax.figure.show()
+            raw_input()
+            ax.clear()
+            for G in fourierGradients.T:
+                ax.plot(freq, G)
+            ax.figure.show()
+            raw_input()
 
 
         
@@ -426,10 +429,22 @@ class Anamorphose( object ):
         self.Anamorphs = []
         self.IMs = []
         for i in range(self.nMeasurements):
-            self.Anamorphs.append(Anamorph(directory=self.dir, index=i+1))
-            self.Anamorphs[-1].loadData()
-            self.Anamorphs[-1].extractModulation()
-            self.IMs.append(self.Anamorphs[-1].extractIMsFromNoiseModulation(ax=ax))
+            try:
+                self.Anamorphs.append(Anamorph(directory=self.dir, index=i+1))
+                self.Anamorphs[-1].loadData()
+                self.Anamorphs[-1].extractModulation()
+                self.IMs.append(self.Anamorphs[-1].extractIMsFromNoiseModulation(ax=ax))
+            except:
+                pass
+        try:
+            self.startTime = aptime.Time(self.header.get('ESO TPL START')).mjd
+        except:
+            headerTime = self.dir.split('/')
+            HMS = headerTime[-1].split('-')[1]
+            H = HMS[0:2]
+            M = HMS[2:4]
+            S = HMS[4:]
+            self.startTime = aptime.Time(headerTime[2]+'T'+H+':'+M+':'+S).mjd
         """
         self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
                                      '%Y-%m-%dT%H:%M:%S'))
@@ -438,6 +453,84 @@ class Anamorphose( object ):
         self.loopRate = self.header.get('ESO AOS LOOP RATE')
         self.controlGain = self.header.get('ESO AOS GLOBAL GAIN')
         #"""
+
+    def addToDatabase(self):
+        if self.sqlCursor == None:
+            return
+        sqlCommand = "SELECT * FROM CIAO_%d_Anamorphose WHERE TIMESTAMP = %.1f" % (self.CIAO_ID, 
+                      self.startTime)
+        self.sqlCursor.execute(sqlCommand)
+        result = self.sqlCursor.fetchall()
+        if len(result) == 0:
+            values = {}
+            values["TIMESTAMP"] = self.startTime
+            values["DIRECTORY"] = self.dir
+            values["CM_MODES"] = self.header.get('ESO AOS CM MODES CONTROLLED')
+            values["WFS_GEOM"] = self.header.get('ESO AOS GEOM NAME')
+            values["GAIN"] = self.header.get('ESO AOS GLOBAL GAIN')
+            values["LOOPRATE"] = self.header.get('ESO AOS LOOP RATE')
+            values["TTX_REFPOS"] = self.header.get('ESO AOS TTM REFPOS X')
+            values["TTY_REFPOS"] = self.header.get('ESO AOS TTM REFPOS Y')
+            values["WFS_MODE"] = self.header.get('ESO AOS WFS MODE')
+            values["ALT"] = self.header.get('ESO TEL ALT')
+            values["AZ"] = self.header.get('ESO TEL AZ')
+            values["DROT_ENC"] = self.header.get('ESO INS DROT ENC')
+            values["FILT_ENC"] = self.header.get('ESO INS FILT1 ENC')
+            values["MSEL_ENC"] = self.header.get('ESO INS MSEL ENC')
+            values["PMTIL_ENC"] = self.header.get('ESO INS PMTIL ENC')
+            values["PMTIP_ENC"] = self.header.get('ESO INS PMTIP ENC')
+            values["FLDLX"] = self.header.get('ESO INS FLDL X')
+            values["FLDLY"] = self.header.get('ESO INS FLDL Y')
+            values["FSM_A_U"] = self.header.get('ESO STS FSM1 GUIDE U')
+            values["FSM_A_W"] = self.header.get('ESO STS FSM1 GUIDE W')
+            values["FSM_A_X"] = self.header.get('ESO STS FSM1 POSX')
+            values["FSM_A_Y"] = self.header.get('ESO STS FSM1 POSY')
+            values["FSM_B_U"] = self.header.get('ESO STS FSM2 GUIDE U')
+            values["FSM_B_W"] = self.header.get('ESO STS FSM2 GUIDE W')
+            values["FSM_B_X"] = self.header.get('ESO STS FSM2 POSX')
+            values["FSM_B_Y"] = self.header.get('ESO STS FSM2 POSY')
+            values["VCM_A_U"] = self.header.get('ESO STS VCM1 GUIDE U')
+            values["VCM_A_W"] = self.header.get('ESO STS VCM1 GUIDE W')
+            values["VCM_A_X"] = self.header.get('ESO STS VCM1 POSX')
+            values["VCM_A_Y"] = self.header.get('ESO STS VCM1 POSY')
+            values["VCM_B_U"] = self.header.get('ESO STS VCM2 GUIDE U')
+            values["VCM_B_W"] = self.header.get('ESO STS VCM2 GUIDE W')
+            values["VCM_B_X"] = self.header.get('ESO STS VCM2 POSX')
+            values["VCM_B_Y"] = self.header.get('ESO STS VCM2 POSY')
+            values["M10_POSANG"] = self.header.get('ESO STS M10 POSANG')
+
+            format_str= """INSERT INTO CIAO_"""+str(self.CIAO_ID)+"""_Anamorphose (TIMESTAMP, DIRECTORY, 
+                 CM_MODES, WFS_GEOM, GAIN, LOOPRATE, TTX_REFPOS, TTY_REFPOS, WFS_MODE,
+                 ALT, AZ, DROT_ENC, FILT_ENC, MSEL_ENC, PMTIL_ENC, PMTIP_ENC, FLDLX, FLDLY, FSM_A_U, 
+                 FSM_A_W, FSM_A_X, FSM_A_Y, FSM_B_U, FSM_B_W, FSM_B_X, FSM_B_Y, VCM_A_U, VCM_A_W, 
+                 VCM_A_X, VCM_A_Y, VCM_B_U, VCM_B_W, VCM_B_X, VCM_B_Y, M10_POSANG)
+                 VALUES ('{timestamp}', '{directory}', '{cm_modes}', 
+                 '{wfs_geom}', '{gain}', '{looprate}', '{ttx_refpos}', '{tty_refpos}', '{wfs_mode}', 
+                 '{alt}', '{az}', '{derot_enc}', '{filt_enc}', '{msel_enc}', '{pmtil_enc}', 
+                 '{pmtip_enc}', '{fldlx}', '{fldly}', '{fsm_a_u}', '{fsm_a_w}', '{fsm_a_x}','{fsm_a_y}',
+                 '{fsm_b_u}', '{fsm_b_w}', '{fsm_b_x}', '{fsm_b_y}', '{vcm_a_u}',
+                 '{vcm_a_w}', '{vcm_a_x}', '{vcm_a_y}', '{vcm_b_u}', '{vcm_b_w}',
+                 '{vcm_b_x}', '{vcm_b_y}', '{m10}');"""
+                
+            sqlCommand = format_str.format(timestamp=values['TIMESTAMP'],directory=values['DIRECTORY'],
+                 cm_modes=values['CM_MODES'], wfs_geom=values['WFS_GEOM'], gain=values['GAIN'],
+                 looprate=values['LOOPRATE'], ttx_refpos=values['TTX_REFPOS'],
+                 tty_refpos=values['TTY_REFPOS'], wfs_mode=values['WFS_MODE'],
+                 alt=values['ALT'], az=values['AZ'], derot_enc=values['DROT_ENC'], 
+                 filt_enc=values['FILT_ENC'], msel_enc=values['MSEL_ENC'],
+                 pmtil_enc=values['PMTIL_ENC'], pmtip_enc=values['PMTIP_ENC'],
+                 fldlx=values['FLDLX'], fldly=values['FLDLY'], fsm_a_u=values['FSM_A_U'],
+                 fsm_a_w=values['FSM_A_W'], fsm_a_x=values['FSM_A_X'],
+                 fsm_a_y=values['FSM_A_Y'], fsm_b_u=values['FSM_B_U'],
+                 fsm_b_w=values['FSM_B_W'], fsm_b_x=values['FSM_B_X'],
+                 fsm_b_y=values['FSM_B_Y'], vcm_a_u=values['VCM_A_U'],
+                 vcm_a_w=values['VCM_A_W'], vcm_a_x=values['VCM_A_X'],
+                 vcm_a_y=values['VCM_A_Y'], vcm_b_u=values['VCM_B_U'],
+                 vcm_b_w=values['VCM_B_W'], vcm_b_x=values['VCM_B_X'],
+                 vcm_b_y=values['VCM_B_Y'], m10=values['M10_POSANG'])
+            
+            self.sqlCursor.execute(sqlCommand)
+ 
 
 class DataLogger( object ):
     def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
@@ -472,12 +565,14 @@ class DataLogger( object ):
         self.TTM = data.field('ITTM_Positions')
         self.FrameCounter = data.field('FrameCounter')
         try:
-            self.startTime = time.mktime(time.strptime(self.header.get('ESO TPL START'), 
-                                     '%Y-%m-%dT%H:%M:%S'))
+            self.startTime = aptime.Time(self.header.get('ESO TPL START')).mjd
         except:
             headerTime = self.dir.split('/')
-            self.startTime = time.mktime(time.strptime(headerTime[2]+'T'+headerTime[-1].split('-')[1], 
-                                     '%Y-%m-%dT%H%M%S'))
+            HMS = headerTime[-1].split('-')[1]
+            H = HMS[0:2]
+            M = HMS[2:4]
+            S = HMS[4:]
+            self.startTime = aptime.Time(headerTime[2]+'T'+H+':'+M+':'+S).mjd
         self.time = data.field('Seconds')+data.field('USeconds')/100000.0
         self.time -= self.time[0]
         self.loopRate = self.header.get('ESO AOS LOOP RATE')
@@ -519,7 +614,7 @@ class DataLogger( object ):
             self.REFSLP = pyfits.getdata(self.datadir+self.dir+'/Acq.DET1.REFSLP_0001.fits')
         except:
             self.REFSLP = None
-    
+
     def __lt__(self, other):
         if hasattr(other, startTime):
             return self.startTime < other.startTime
@@ -545,7 +640,14 @@ class DataLogger( object ):
             return self.startTime != other.startTime
 
     def getRefSlopeZernikes(self):
+        rotatedZernikes = self.S2Z.dot(self.REFSLP.T)
+        
+        print asdf
         return self.S2Z.dot(self.REFSLP.T)
+
+    def updateTimeStamp(self, oldTimeStamp):
+        sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIMESTAMP = %.7f WHERE TIMESTAMP =%.1f" % (self.CIAO_ID, self.startTime, oldTimeStamp)
+        self.sqlCursor.execute(sqlCommand)
 
     def addToDatabase(self):
         if self.sqlCursor == None:
@@ -2692,6 +2794,10 @@ class waveFront( object ):
         self.parent = parent
         self.beamSize = beamSize
         
+        if self.parent == None:
+            self.wavelength = 2200.0
+        else:
+            self.wavelength = self.parent.wavelength
         self.zernikes = []
         self.nZern = nZern
         for i in numpy.arange(2, self.nZern):
@@ -2709,7 +2815,7 @@ class waveFront( object ):
         """
         nzern = numpy.min([len(zern), self.nZern])
         for i in range(nzern):
-            self.zernikes[i].setMag(zern[i]*2.0*numpy.pi/self.parent.wavelength)
+            self.zernikes[i].setMag(zern[i]*2.0*numpy.pi/self.wavelength)
         #for mag, z in zip(zern,
         #        [self.tip, self.tilt, self.defocus, self.astig1, self.astig2]):
         #    z.setMag(mag*2.0*numpy.pi/self.parent.wavelength)

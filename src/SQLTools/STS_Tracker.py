@@ -1,46 +1,55 @@
-import sqlite3
+import Graffity
+import CIAO_DatabaseTools
 from matplotlib import pyplot
 import scipy
 import numpy
-import Graffity
-import os
-from matplotlib import cm
 
-CDMS_BaseDir = os.environ.get('CDMS_BASEDIR')
-CDMS_ConfigDir = os.environ.get('CDMS_CONFIGDIR')
+db = CIAO_DatabaseTools.CIAO_Database()
 
-fig1 = pyplot.figure(0)
-ax11 = fig1.add_axes([0.1, 0.1, 0.4, 0.4])
-ax12 = fig1.add_axes([0.1, 0.4, 0.4, 0.4])
-ax13 = fig1.add_axes([0.4, 0.1, 0.4, 0.4])
-ax14 = fig1.add_axes([0.4, 0.4, 0.4, 0.4])
-ax11.clear()
-ax12.clear()
-ax13.clear()
-ax14.clear()
+UTS = [1, 2, 3, 4]
 
-database = os.environ.get('CIAO_SQL')+'Dataloggers.db'
+anamorphose = db.query(keywords = ["M10_POSANG", "FSM_B_W", "FSM_B_U", "VCM_B_W", "VCM_B_U"], AVC_State='BOTH', timeOfDay="DAY", UTS=UTS, startTime='2016-03-25 00:00:00', TemplateType='Anamorphose')
+M10 = {}
+FSM_B_W = {}
+FSM_B_U = {}
+VCM_B_W = {}
+VCM_B_U = {}
+TIme = {}
+colors = ['b', 'g', 'r', 'c']
 
-connection = sqlite3.connect(database)
+for UT in UTS:
+    print UT
+    M10[UT] = anamorphose[UT][0]
+    FSM_B_W[UT] = anamorphose[UT][1]
+    FSM_B_U[UT] = anamorphose[UT][2]
+    VCM_B_W[UT] = anamorphose[UT][3]
+    VCM_B_U[UT] = anamorphose[UT][4]
 
-cursor = connection.cursor()
+fig = pyplot.figure(0)
+fig.clear()
+ax1 = fig.add_subplot(331)
+ax1.clear()
+ax2 = fig.add_subplot(332)
+ax2.clear()
+ax3 = fig.add_subplot(333)
+ax3.clear()
+ax4 = fig.add_subplot(334)
+ax4.clear()
+ax5 = fig.add_subplot(335)
+ax5.clear()
+ax6 = fig.add_subplot(336)
+ax6.clear()
+ax7 = fig.add_subplot(337)
+ax7.clear()
+ax8 = fig.add_subplot(338)
+ax8.clear()
+ax9 = fig.add_subplot(339)
+ax9.clear()
 
-Strehl = {}
-Seeing = {}
+for UT, color in zip(UTS, colors):
+    order = numpy.argsort(dataloggers[UT][:,-4])
+    for i, ax in zip(range(9), [ax1, ax2, ax3, ax4, ax5, ax6, ax7, ax8, ax9]):
+        ax.plot(dataloggers[UT][order,-4], NCPA[UT][order, i], color=color)
+        ax.set_ybound(numpy.min(NCPA[UT][order, i]), numpy.max(NCPA[UT][order,i]))
 
-colors = ['b', 'g', 'r', 'y']
-for i in numpy.arange(4):
-    ciaoID = i+1
-    #Get Column Names
-    command = "SELECT TIMESTAMP, FLDLX, FLDLY, FSM_A_U, FSM_A_W, FSM_A_X, FSM_A_Y, FSM_B_U, FSM_B_W, FSM_B_X, FSM_B_Y, VCM_A_U, VCM_A_W, VCM_A_X, VCM_A_Y, VCM_B_U, VCM_B_W, VCM_B_X, VCM_B_Y, M10_POSANG from CIAO_%d_DataLoggers " % ciaoID
-    
-    cursor.execute(command)
-    data = numpy.array(cursor.fetchall())
-
-    ax11.scatter(data[:,1], data[:,2], color = colors[i])
-    ax12.scatter(data[:,3], data[:,4], color = colors[i])
-
-fig1.show()
-
-cursor.close()
-connection.close()
+fig.show()

@@ -7,6 +7,7 @@ import glob
 import os
 import xlwt
 from scipy import optimize
+from astropy import time as aptime
 
 def fitFlux(Flux, fitParams):
     A = {}
@@ -24,6 +25,35 @@ def fitFlux(Flux, fitParams):
 
     return fit
     
+
+metrologyFile = '/home/cdeen/Data/GRAVITY/deltaMet.txt'
+metTime = []
+du4u3 = []
+du4u2 = []
+du4u1 = []
+du3u2 = []
+du3u1 = []
+du2u1 = []
+
+for line in open(metrologyFile, 'r').readlines():
+    l = line.split()
+    if len(l) > 6:
+        metTime.append(float(l[0]))
+        du4u3.append(float(l[1]))
+        du4u2.append(float(l[2]))
+        du4u1.append(float(l[3]))
+        du3u2.append(float(l[4]))
+        du3u1.append(float(l[5]))
+        du2u1.append(float(l[6]))
+
+metTime = numpy.array(metTime)
+du4u3 = numpy.array(du4u3)
+du4u2 = numpy.array(du4u2)
+du4u1 = numpy.array(du4u1)
+du3u2 = numpy.array(du3u2)
+du3u1 = numpy.array(du3u1)
+du2u1 = numpy.array(du2u1)
+
 
 fig1 = pyplot.figure(1)
 fig1.clear()
@@ -61,12 +91,16 @@ ax34.clear()
 fig4 = pyplot.figure(4)
 fig4.clear()
 ax41 = fig4.add_axes([0.1, 0.1, 0.4, 0.4])
+ax412 = ax41.twinx()
 ax41.clear()
 ax42 = fig4.add_axes([0.1, 0.5, 0.4, 0.4])
+ax422 = ax42.twinx()
 ax42.clear()
 ax43 = fig4.add_axes([0.5, 0.1, 0.4, 0.4])
+ax432 = ax43.twinx()
 ax43.clear()
 ax44 = fig4.add_axes([0.5, 0.5, 0.4, 0.4])
+ax442 = ax44.twinx()
 ax44.clear()
 
 #db = CIAO_DatabaseTools.CIAO_Database()
@@ -166,18 +200,33 @@ ax24.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_Y[4][1::2], color 
 ax24.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_Z[4][1::2], color = 'r')
 fig2.show()
 
-ax41.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_U[1][1::2], color = 'b')
-ax41.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_V[1][1::2], color = 'g')
-ax41.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_W[1][1::2], color = 'r')
-ax42.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_U[2][1::2], color = 'b')
-ax42.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_V[2][1::2], color = 'g')
-ax42.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_W[2][1::2], color = 'r')
-ax43.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_U[3][1::2], color = 'b')
-ax43.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_V[3][1::2], color = 'g')
-ax43.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_W[3][1::2], color = 'r')
-ax44.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_U[4][1::2], color = 'b')
-ax44.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_V[4][1::2], color = 'g')
-ax44.plot(grav.DualSciP2VM.TIME[1::2], grav.DualSciP2VM.PUPIL_W[4][1::2], color = 'r')
+#grav_time = aptime.Time(grav.DualSciP2VM.TIME[1::2], format='unix')
+grav_time = grav.DualSciP2VM.TIME[1::2]
+#met_time = aptime.Time(metTime, format='mjd')
+ax41.plot(grav_time, grav.DualSciP2VM.PUPIL_U[1][1::2], color = 'b')
+ax41.plot(grav_time, grav.DualSciP2VM.PUPIL_V[1][1::2], color = 'g')
+ax41.plot(grav_time, grav.DualSciP2VM.PUPIL_W[1][1::2], color = 'r')
+ax412.plot(metTime, du4u1, ls = ':', color = 'b')
+ax412.plot(metTime, du3u1, ls = ':', color = 'g')
+ax412.plot(metTime, du2u1, ls = ':', color = 'r')
+ax42.plot(grav_time, grav.DualSciP2VM.PUPIL_U[2][1::2], color = 'b')
+ax42.plot(grav_time, grav.DualSciP2VM.PUPIL_V[2][1::2], color = 'g')
+ax42.plot(grav_time, grav.DualSciP2VM.PUPIL_W[2][1::2], color = 'r')
+ax422.plot(metTime, du4u2, ls = ':', color = 'b')
+ax422.plot(metTime, du3u2, ls = ':', color = 'g')
+ax422.plot(metTime, du2u1, ls = ':', color = 'r')
+ax43.plot(grav_time, grav.DualSciP2VM.PUPIL_U[3][1::2], color = 'b')
+ax43.plot(grav_time, grav.DualSciP2VM.PUPIL_V[3][1::2], color = 'g')
+ax43.plot(grav_time, grav.DualSciP2VM.PUPIL_W[3][1::2], color = 'r')
+ax432.plot(metTime, du4u3, ls = ':', color = 'b')
+ax432.plot(metTime, du3u2, ls = ':', color = 'g')
+ax432.plot(metTime, du3u1, ls = ':', color = 'r')
+ax44.plot(grav_time, grav.DualSciP2VM.PUPIL_U[4][1::2], color = 'b')
+ax44.plot(grav_time, grav.DualSciP2VM.PUPIL_V[4][1::2], color = 'g')
+ax44.plot(grav_time, grav.DualSciP2VM.PUPIL_W[4][1::2], color = 'r')
+ax442.plot(metTime, du4u1, ls = ':', color = 'b')
+ax442.plot(metTime, du4u2, ls = ':', color = 'g')
+ax442.plot(metTime, du4u3, ls = ':', color = 'r')
 fig4.show()
 
 ax31.plot(grav.DITTimes[1][0], grav.FT_Fluxes[1][0],color = 'b')

@@ -108,8 +108,8 @@ for line in data.readlines():
         except:
             pass
 
-ra_min = '070000.0'
-ra_max = '140000.0'
+ra_min = '150000.0'
+ra_max = '200000.0'
 dec_min = '-600000.0'
 dec_max = '+100000.0'
 cutoff = 7.0
