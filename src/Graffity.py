@@ -197,6 +197,27 @@ class WFS_Frame( object ):
         ax.matshow(self.image)
         ax.figure.show()
 
+    def plotGradients(self, ax=None):
+        if ax == None:
+            fig = pyplot.figure(0)
+            fig.clear()
+            ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+            ax.clear()
+        subapwidth = 8
+        counter = 0
+        for row in range(len(self.subap)):
+            for col in range(len(self.subap[0])):
+                if self.subap[row][col]:
+                    centerx = row*subapwidth+subapwidth/2.0-0.5
+                    centery = col*subapwidth+subapwidth/2.0-0.5
+                    distx = centerx - self.gradients[counter][1]
+                    disty = centery - self.gradients[counter][0]
+                    ax.plot([centery, centery+disty*100],[centerx,
+                             centerx+distx*100])
+                    counter += 1
+        print self.gradients[5][1]
+        fig.show()
+
 class GRAVITY_Dual_Sci_P2VM( object ):
     def __init__(self, fileBase = '', startTime=0.0):
         self.filename = fileBase+'_dualscip2vmred.fits'
@@ -2470,12 +2491,13 @@ class WFS ( object ):
         self.datadir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))+'/data/'
         self.detector = detector(self, beamSize = beamSize)
         self.lenslet = lensletArray(self, angle = angle)
-        self.wavefront = waveFront(self)
+        self.wavefront = waveFront(self, nZern=50)
         self.pupil = pupil(0.0, 0.0, innerRadius=self.beamSize/2.0*self.centObscScale,
                 outerRadius=self.beamSize/2.0)
         self.DM = deformableMirror(self)
         self.derotator = derotator(self)
         self.centroids = []
+        self.WFS_Frame = WFS_Frame()
 
     def setupInstrument(self, zern=None, pupil=None, actuatorPokes=None,
             derotAngle=0.0, lensletAngle=0.0):
@@ -2496,7 +2518,12 @@ class WFS ( object ):
             self.DM.setMirror(actuatorPokes)
 
     def expose(self):
-        self.centroids.append(self.detector.expose())
+        self.centroids.append(self.detector.expose(Delta=True))
+
+
+    def plot(self):
+        self.WFS_Frame.gradients = self.centroids[-1]
+        self.WFS_Frame.plotGradients()
 
     def calcWaveFront(self, x, y):
         wave = self.wavefront.calcWaveFront(x, y)
@@ -2659,13 +2686,15 @@ class detector( object ):
                         subaperture))
         return numpy.array(centroids)
 
-    def calculateCentroids(self, zern, actuatorPokes):
+    def calculateCentroids(self, zern=None, actuatorPokes=None):
         """
             Calcualates the locations of the centroids under the given 
             Zernike coefficients
         """
-        self.wavefront.setZern(zern)
-        self.DM.setMirror(actuatorPokes)
+        if zern != None:
+            self.wavefront.setZern(zern)
+        if actuatorPokes != None:
+            self.DM.setMirror(actuatorPokes)
         dx = 10.0   # Microns
         dy = 10.0   # Microns
         centroids = []
