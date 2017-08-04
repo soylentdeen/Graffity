@@ -3,33 +3,35 @@ import Graffity
 import glob
 import os
 
-connection = sqlite3.connect('/home/cdeen/Data/CIAO/Dataloggers.db')
+connection = sqlite3.connect(os.environ.get('CIAO_SQL')+'Dataloggers.db')
 
 cursor = connection.cursor()
 
 CDMS_BaseDir = '/home/cdeen/Code/CIAO/SPARTA/SPARTA_CIAO/CONFIG/spcicfg'
 CDMS_ConfigDir = '/config/RTCDATA/CIAO/DEFAULT/'
 
-sqlCommand = "SELECT * FROM CIAO_1_DataLoggers"
-
+sqlCommand = "ALTER TABLE CIAO_1_DataLoggers ADD TIPPOWER"
+cursor.execute(sqlCommand)
+sqlCommand = "ALTER TABLE CIAO_1_DataLoggers ADD TILTPOWER"
 cursor.execute(sqlCommand)
 
-result = cursor.fetchall()
+sqlCommand = "ALTER TABLE CIAO_2_DataLoggers ADD TIPPOWER"
+cursor.execute(sqlCommand)
+sqlCommand = "ALTER TABLE CIAO_2_DataLoggers ADD TILTPOWER"
+cursor.execute(sqlCommand)
 
-for source in result:
-    data = Graffity.DataLogger(directory=source[1], CMDS_BaseDir=CDMS_BaseDir,
-                               CDMS_ConfigDir=CDMS_ConfigDir, sqlCursor=cursor)
-    data.loadData()
+sqlCommand = "ALTER TABLE CIAO_3_DataLoggers ADD TIPPOWER"
+cursor.execute(sqlCommand)
+sqlCommand = "ALTER TABLE CIAO_3_DataLoggers ADD TILTPOWER"
+cursor.execute(sqlCommand)
 
-"""
-        DL = Graffity.DataLogger(directory=dp, CDMS_BaseDir=CDMS_BaseDir, CDMS_ConfigDir=CDMS_ConfigDir,
-                                 sqlCursor=cursor)
-        DL.loadData()
-        DL.addToDatabase()
-"""
+sqlCommand = "ALTER TABLE CIAO_4_DataLoggers ADD TIPPOWER"
+cursor.execute(sqlCommand)
+sqlCommand = "ALTER TABLE CIAO_4_DataLoggers ADD TILTPOWER"
+cursor.execute(sqlCommand)
 
 
-#connection.commit()
+connection.commit()
 connection.close()
 
 

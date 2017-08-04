@@ -1,4 +1,8 @@
 import sqlite3
+import sys
+
+sys.path.append('../')
+
 import Graffity
 import glob
 import os

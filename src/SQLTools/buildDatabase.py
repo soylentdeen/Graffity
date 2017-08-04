@@ -6,10 +6,10 @@ connection = sqlite3.connect(os.environ.get('CIAO_SQL')+'Dataloggers.db')
 
 cursor = connection.cursor()
 
-cursor.execute("""DROP TABLE CIAO_1_Dataloggers;""")
-cursor.execute("""DROP TABLE CIAO_2_Dataloggers;""")
-cursor.execute("""DROP TABLE CIAO_3_Dataloggers;""")
-cursor.execute("""DROP TABLE CIAO_4_Dataloggers;""")
+#cursor.execute("""DROP TABLE CIAO_1_Dataloggers;""")
+#cursor.execute("""DROP TABLE CIAO_2_Dataloggers;""")
+#cursor.execute("""DROP TABLE CIAO_3_Dataloggers;""")
+#cursor.execute("""DROP TABLE CIAO_4_Dataloggers;""")
 
 sqlCommand = """
 CREATE TABLE CIAO_1_DataLoggers ( 

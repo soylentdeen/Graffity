@@ -2,6 +2,10 @@ import sqlite3
 from matplotlib import pyplot
 import scipy
 import numpy
+import sys
+
+sys.path.append('../')
+
 import Graffity
 import os
 from matplotlib import cm
