@@ -18,7 +18,7 @@ db = CIAO_DatabaseTools.CIAO_Database()
 UTS = [1,2,3,4]
 colors = ['b', 'g', 'r', 'y']
 
-values = db.query(keywords = ["SEEING", "STREHL"], AVC_State='ON',
+values = db.query(keywords = ["TIP_RESIDUALS", "TILT_RESIDUALS"], AVC_State='ON',
         timeOfDay='NIGHT', UTS=UTS)
                   #startTime='2017-03-25 00:00:00')
                   #endTime='2017-02-28 00:00:00')

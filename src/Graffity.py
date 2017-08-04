@@ -255,9 +255,13 @@ class GRAVITY_AstroReduced( object ):
         HDUList.close()
 
 class GRAVITY_Data( object ):
-    def __init__(self, fileBase='', UTS=[1,2,3,4]):
+    def __init__(self, fileBase='', UTS=[1,2,3,4], sqlCursor=None):
         self.datadir = os.environ.get('GRAVITY_DATA')
-        self.fileBase = fileBase
+        if self.datadir in fileBase:
+            self.fileBase = str(fileBase[len(self.datadir):])
+        else:
+            self.fileBase = fileBase
+        self.sqlCursor = sqlCursor
         self.UTS = UTS
         #self.Dual_SciVis = GRAVITY_Dual_SciVis(fileBase=self.datadir+self.fileBase)
         self.AstroReduced = GRAVITY_AstroReduced(fileBase=self.datadir+self.fileBase)
@@ -278,7 +282,29 @@ class GRAVITY_Data( object ):
                 self.DITTimes[UT].append((d.field('TIME')[UT-1::4]*1e-6)/(24*3600.0)+self.startTime.mjd)
                 self.SC_Fluxes[UT].append(d.field('TOTALFLUX_SC')[UT-1::4])
                 self.FT_Fluxes[UT].append(d.field('TOTALFLUX_FT')[UT-1::4])
+
+    def computeACQCAMStrehl(self):
+        print asdf
+        #AcqCamImage = AcqCamImage(
         
+    def addToDatabase(self):
+        if self.sqlCursor == None:
+            return
+        sqlCommand = "SELECT * FROM GRAVITY_OBS WHERE TIMESTAMP = %.7f" % self.startTime.mjd
+        self.sqlCursor.execute(sqlCommand)
+        result = self.sqlCursor.fetchall()
+        if len(result) == 0:
+            values = {}
+            values["TIMESTAMP"] = self.startTime.mjd
+            values["DIRECTORY"] = self.datadir+self.fileBase
+
+            format_str= """INSERT INTO GRAVITY_OBS (TIMESTAMP, DIRECTORY)  
+                 VALUES ('{timestamp}', '{directory}');"""
+                
+            sqlCommand = format_str.format(timestamp=values['TIMESTAMP'],directory=values['DIRECTORY'])
+            
+            self.sqlCursor.execute(sqlCommand)
+
 
     def plotReducedSCFluxes(self, ax=None):
         ax.clear()
@@ -851,8 +877,62 @@ class DataLogger( object ):
 
         if (saveData and numpy.isfinite(self.Strehl) and numpy.isfinite(self.Seeing) and
                      numpy.isfinite(self.Tau0)):
-            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.4f, SEEING = %.4f, TAU0 = %.4f, TERR = %.4f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, self.TemporalError, self.startTime)
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.4f, SEEING = %.4f, TAU0 = %.4f, TERR = %.4f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, self.TemporalError, self.startTime)
             self.sqlCursor.execute(sqlCommand)
+
+    def computeTTPS(self, ax = None, freq = 2.2, saveData=False,
+            returnTipTilt=False, Tip=None, Tilt=None):
+        if Tip != None:
+            A = numpy.log10(numpy.sum(numpy.array([10.0**Tip, 10.0**Tilt]), axis=0))
+            m = numpy.array([numpy.ones(self.ZPowerFrequencies.shape),
+                numpy.log10(self.ZPowerFrequencies)])
+            im = numpy.linalg.pinv(m)
+            spectralSlopes = im.T.dot(A.T)
+
+        else:
+            A = numpy.log10(numpy.sum(self.ZPowerCommands[0:2,], axis=0))
+            m = numpy.array([numpy.ones(self.ZPowerFrequencies.shape),
+                numpy.log10(self.ZPowerFrequencies)])
+            im = numpy.linalg.pinv(m)
+            spectralSlopes = im.T.dot(A.T)
+
+        TipModel = spectralSlopes[0] + numpy.log10(self.ZPowerFrequencies)*spectralSlopes[1]
+        TiltModel = spectralSlopes[0] + numpy.log10(self.ZPowerFrequencies)*spectralSlopes[1]
+        if ax != None:
+            ax.clear()
+            ax.plot(numpy.log10(self.ZPowerFrequencies),
+                    numpy.log10(self.ZPowerCommands[0]) - TipModel, color = 'r')
+            ax.plot(numpy.log10(self.ZPowerFrequencies),
+                    numpy.log10(self.ZPowerCommands[1]) - TiltModel, color = 'b')
+            ax.plot(numpy.log10([freq, freq]), [-1, 1], color = 'g')
+            ax.plot(numpy.log10([freq, freq]) - 0.15, [-1, 1], color = 'g')
+            ax.plot(numpy.log10([freq, freq]) + 0.15, [-1, 1], color = 'g')
+                
+            ax.figure.show()
+            raw_input()
+
+        logFreq = numpy.log10(self.ZPowerFrequencies)
+        Window = (logFreq > (numpy.log10(freq) - 0.15)) & (logFreq <
+                (numpy.log10(freq) + 0.15))
+
+        # Power in the Tip command
+        logTip = numpy.log10(self.ZPowerCommands[0]) - TipModel
+        logTip -= numpy.median(logTip)
+        TipPower = scipy.integrate.trapz(logTip[Window], x=10.0**logFreq[Window])
+        
+        # Power in the Tilt command
+        logTilt = numpy.log10(self.ZPowerCommands[1]) - TiltModel
+        logTilt -= numpy.median(logTilt)
+        TiltPower = scipy.integrate.trapz(logTilt[Window], x=10.0**logFreq[Window])
+
+        print self.dir, TipPower, TiltPower
+        if (saveData and numpy.isfinite(TipPower) and numpy.isfinite(TiltPower)):
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIPPOWER = %.2f, TILTPOWER = %.2f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, TipPower, TiltPower, self.startTime)
+            self.sqlCursor.execute(sqlCommand)
+
+        if returnTipTilt:
+            return numpy.log10(self.ZPowerCommands[0]), numpy.log10(self.ZPowerCommands[1]), numpy.log10(self.ZPowerFrequencies)
+
 
     def synchronizeData(self):
         self.TTM = self.TTM[:-4,:]
@@ -1123,8 +1203,10 @@ class DataLogger( object ):
 
         if saveData:
             TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
-            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIP_RESIDUALS = %.4f, TILT_RESIDUALS = %.4f WHERE TIMESTAMP = %d;" % (self.CIAO_ID, TTResid[0], TTResid[1], self.startTime)
+            sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIP_RESIDUALS = %.4f, TILT_RESIDUALS = %.4f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, TTResid[0], TTResid[1], self.startTime)
             self.sqlCursor.execute(sqlCommand)
+
+    #def getGRAVITY
 
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,
