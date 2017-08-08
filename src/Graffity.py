@@ -136,6 +136,112 @@ class FOVFrame( object ):
             raw_input()
         
 
+class LaserBeaconData( object ):
+    def __init__(self, df=''):
+        self.df = df
+        self.header = pyfits.getheader(df)
+        self.HDU = pyfits.open(df)
+        self.Time = self.HDU[5].data['TIME']/1e6
+        self.Piezo1 = self.HDU[5].data['Piezo1']
+        self.Piezo2 = self.HDU[5].data['Piezo2']
+        self.Piezo3 = self.HDU[5].data['Piezo3']
+        self.Piezo4 = self.HDU[5].data['Piezo4']
+        self.PSD1 = self.HDU[5].data['PSD1']
+        self.PSD2 = self.HDU[5].data['PSD2']
+        self.PSD3 = self.HDU[5].data['PSD3']
+        self.PSD4 = self.HDU[5].data['PSD4']
+
+        self.loopRate = 1.0/numpy.mean(numpy.diff(self.Time))
+        self.R = 0.5
+
+    def computePSDs(self):
+        NWindows = computeNWindows(self.Piezo1, self.loopRate, self.R)
+        self.Piezo1 = FourierDetrend(self.Piezo1, 'TwoPoints')
+
+        WindowSize = 20.0
+        N = int(WindowSize*self.loopRate)
+
+        self.PiezoPower = {1:[], 2:[], 3:[], 4:[]}
+        self.PSDPower = {1:[], 2:[], 3:[], 4:[]}
+        i = 0
+        while i+N < len(self.Time):
+            time = self.Time[i:i+N]
+            
+            PiezoPower = {}
+            PSDPower = {}
+            Piezo1 = self.Piezo1[i:i+N,:]
+            Piezo2 = self.Piezo2[i:i+N,:]
+            Piezo3 = self.Piezo3[i:i+N,:]
+            Piezo4 = self.Piezo4[i:i+N,:]
+            PSD1 = self.PSD1[i:i+N,:]
+            PSD2 = self.PSD2[i:i+N,:]
+            PSD3 = self.PSD3[i:i+N,:]
+            PSD4 = self.PSD4[i:i+N,:]
+            i = i+N
+            NFrames = Piezo1.shape[0]
+            PiezoPower[1] = numpy.abs(numpy.fft.fft(Piezo1.T/NFrames))**2.0
+            PiezoPower[2] = numpy.abs(numpy.fft.fft(Piezo2.T/NFrames))**2.0
+            PiezoPower[3] = numpy.abs(numpy.fft.fft(Piezo3.T/NFrames))**2.0
+            PiezoPower[4] = numpy.abs(numpy.fft.fft(Piezo4.T/NFrames))**2.0
+            PSDPower[1] = numpy.abs(numpy.fft.fft(PSD1.T/NFrames))**2.0
+            PSDPower[2] = numpy.abs(numpy.fft.fft(PSD2.T/NFrames))**2.0
+            PSDPower[3] = numpy.abs(numpy.fft.fft(PSD3.T/NFrames))**2.0
+            PSDPower[4] = numpy.abs(numpy.fft.fft(PSD4.T/NFrames))**2.0
+            Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+
+            PiezoPower[1] = numpy.fft.fftshift(PiezoPower[1], axes=1)
+            PiezoPower[2] = numpy.fft.fftshift(PiezoPower[2], axes=1)
+            PiezoPower[3] = numpy.fft.fftshift(PiezoPower[3], axes=1)
+            PiezoPower[4] = numpy.fft.fftshift(PiezoPower[4], axes=1)
+            PSDPower[1] = numpy.fft.fftshift(PSDPower[1], axes=1)
+            PSDPower[2] = numpy.fft.fftshift(PSDPower[2], axes=1)
+            PSDPower[3] = numpy.fft.fftshift(PSDPower[3], axes=1)
+            PSDPower[4] = numpy.fft.fftshift(PSDPower[4], axes=1)
+            Freq = numpy.fft.fftshift(Freq)
+            PiezoPower[1] = 2.0*PiezoPower[1][:,Freq >= 0]
+            PiezoPower[2] = 2.0*PiezoPower[2][:,Freq >= 0]
+            PiezoPower[3] = 2.0*PiezoPower[3][:,Freq >= 0]
+            PiezoPower[4] = 2.0*PiezoPower[4][:,Freq >= 0]
+            PSDPower[1] = 2.0*PSDPower[1][:,Freq >= 0]
+            PSDPower[2] = 2.0*PSDPower[2][:,Freq >= 0]
+            PSDPower[3] = 2.0*PSDPower[3][:,Freq >= 0]
+            PSDPower[4] = 2.0*PSDPower[4][:,Freq >= 0]
+            Freq = Freq[Freq >= 0]
+            PiezoPower[1][:,0] /= 2.0
+            PiezoPower[2][:,0] /= 2.0
+            PiezoPower[3][:,0] /= 2.0
+            PiezoPower[4][:,0] /= 2.0
+            PSDPower[1][:,0] /= 2.0
+            PSDPower[2][:,0] /= 2.0
+            PSDPower[3][:,0] /= 2.0
+            PSDPower[4][:,0] /= 2.0
+            PiezoPower[1] = PiezoPower[1] / numpy.mean(numpy.diff(Freq))
+            PiezoPower[2] = PiezoPower[2] / numpy.mean(numpy.diff(Freq))
+            PiezoPower[3] = PiezoPower[3] / numpy.mean(numpy.diff(Freq))
+            PiezoPower[4] = PiezoPower[4] / numpy.mean(numpy.diff(Freq))
+            PSDPower[1] = PSDPower[1] / numpy.mean(numpy.diff(Freq))
+            PSDPower[2] = PSDPower[2] / numpy.mean(numpy.diff(Freq))
+            PSDPower[3] = PSDPower[3] / numpy.mean(numpy.diff(Freq))
+            PSDPower[4] = PSDPower[4] / numpy.mean(numpy.diff(Freq))
+
+            NSamplesPerWindow = numpy.floor(PiezoPower[1].shape[1]/NWindows)
+            TotalSampleNumber = NWindows * NSamplesPerWindow
+            self.PiezoPower[1].append(PiezoPower[1].T)
+            self.PiezoPower[2].append(PiezoPower[2].T)
+            self.PiezoPower[3].append(PiezoPower[3].T)
+            self.PiezoPower[4].append(PiezoPower[4].T)
+            self.PSDPower[4].append(PSDPower[4].T)
+            self.PSDPower[3].append(PSDPower[3].T)
+            self.PSDPower[2].append(PSDPower[2].T)
+            self.PSDPower[1].append(PSDPower[1].T)
+
+        self.Freq = Freq
+        for i in [1, 2, 3, 4]:
+            self.PiezoPower[i] = numpy.mean(numpy.array(self.PiezoPower[i]), axis=0)
+            self.PSDPower[i] = numpy.mean(numpy.array(self.PSDPower[i]), axis=0)
+        
+
+
 
 class PixelBuffer( object ):
     def __init__(self, df=''):
