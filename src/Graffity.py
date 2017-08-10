@@ -685,6 +685,49 @@ class Anamorphose( object ):
             self.sqlCursor.execute(sqlCommand)
  
 
+class AVC( object ):
+    def __init__(self, PafFile='', AVCFile=''):
+        self.PafFile = PafFile
+        self.AVCFile = AVCFile
+        if PafFile != '':
+            self.parsePaf()
+        if AVCFile != '':
+            self.parseAVC()
+        
+
+    def parsePaf(self):
+        f = open(self.PafFile, 'r')
+        for line in f.readlines():
+            if 'HOCtrAVC.CFG.DYNAMIC.MODE' in line:
+                print 'Hi!'
+
+    def parseAVC(self):
+        data = pyfits.getdata(self.AVCFile)
+        self.FC = data.field('FrameCounter')
+        self.X1 = data.field('X1')
+        self.X2 = data.field('X2')
+        self.X3 = data.field('X3')
+        self.X4 = data.field('X4')
+        self.Omega = data.field('Omega')
+        self.freq = self.Omega/(2.0*3.14159)
+        self.FilterInput = data.field('FilterInput')
+        self.FilterOutput = data.field('FilterOutput')
+
+        self.Modes = {}
+        for i in range(5):
+            self.Modes[i] = {}
+            self.Modes[i]['Frequencies'] = self.freq[0,i*10:(i+1)*10]
+            enabled = []
+            tripped = []
+            for j in range(10):
+                power = numpy.unique(self.FilterOutput[:,i*10+j])
+                enabled.append(len(power) > 1)
+                tripped.append((len(power) > 1) and (0 in power))
+            self.Modes[i]['Enabled'] = numpy.array(enabled)
+            self.Modes[i]['Tripped'] = numpy.array(tripped)
+
+
+
 class DataLogger( object ):
     def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
                  sqlCursor=None):
@@ -717,6 +760,7 @@ class DataLogger( object ):
         self.HODM = data.field('HODM_Positions')
         self.TTM = data.field('ITTM_Positions')
         self.FrameCounter = data.field('FrameCounter')
+        self.AVC = AVC(AVCFile=self.datadir+self.dir+'/CIAO_AVC_0001.fits')
         try:
             self.startTime = aptime.Time(self.header.get('ESO TPL START')).mjd
         except:
@@ -1006,6 +1050,39 @@ class DataLogger( object ):
                      numpy.isfinite(self.Tau0)):
             sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.4f, SEEING = %.4f, TAU0 = %.4f, TERR = %.4f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, self.TemporalError, self.startTime)
             self.sqlCursor.execute(sqlCommand)
+    
+    def measureVibs(self, frequencies=[], saveData=False):
+        self.vibPower = {}
+        for Mode, i in zip(self.AVC.Modes.itervalues(), [0,1,2,7,8]):
+            self.vibPower[i] = {}
+            commPower = {}
+            slopesPower = {}
+            for j in range(10):
+                if Mode['Enabled'][j]:
+                    freq = Mode['Frequencies'][j]
+                    commPower[freq]=self.computeCommVibPower(i, Mode['Frequencies'][j])
+                    slopesPower[freq]=self.computeSlopesVibPower(i, Mode['Frequencies'][j])
+
+            for f in frequencies:
+                commPower[f] = self.computeCommVibPower(i, f)
+                slopesPower[f] = self.computeSlopesVibPower(i, f)
+            self.vibPower[i]['CommPower'] = commPower
+            self.vibPower[i]['SlopesPower'] = slopesPower
+
+    def computeCommVibPower(self, mode, freq):
+        Window = (self.ZPowerFrequencies > (freq - 1.0)) & (self.ZPowerFrequencies < 
+                  (freq + 1.0))
+        retval = scipy.integrate.trapz(self.ZPowerCommands[mode, Window],
+                 x=self.ZPowerFrequencies[Window])
+        return retval
+
+    def computeSlopesVibPower(self, mode, freq):
+        Window = (self.ZPowerFrequencies > (freq - 1.0)) & (self.ZPowerFrequencies < 
+                  (freq + 1.0))
+        retval = scipy.integrate.trapz(self.ZPowerSlopes[mode, Window],
+                 x=self.ZPowerFrequencies[Window])
+        return retval
+
 
     def computeTTPS(self, ax = None, freq = 2.2, saveData=False,
             returnTipTilt=False, Tip=None, Tilt=None):
