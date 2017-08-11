@@ -161,9 +161,9 @@ class CIAO_Database( object ):
                 result = numpy.array(dayTime)
 
             if startTime != None:
-                result = result[result[:,-4] > unicode(aptime.Time(startTime, format='iso').mjd)]
+                result = result[result[:,-4] > aptime.Time(startTime, format='iso').mjd]
             if endTime != None:
-                result = result[result[:,-4] < unicode(aptime.Time(endTime, format='iso').mjd)]
+                result = result[result[:,-4] < aptime.Time(endTime, format='iso').mjd]
             #retval[UT] = []
             #for r in result:
             #    retDict = {}

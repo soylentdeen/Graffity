@@ -726,7 +726,13 @@ class AVC( object ):
             self.Modes[i]['Enabled'] = numpy.array(enabled)
             self.Modes[i]['Tripped'] = numpy.array(tripped)
 
-
+    def setModes(self, modes):
+        self.Modes = {}
+        for i in range(len(modes)):
+            self.Modes[i] = {}
+            self.Modes[i]['Frequencies'] = range(10)
+            self.Modes[i]['Enabled'] = numpy.array([True for j in range(10)])
+            self.Modes[i]['Tripped'] = numpy.array([False for j in range(10)])
 
 class DataLogger( object ):
     def __init__(self, directory='', CDMS_BaseDir='', CDMS_ConfigDir='', RTC_Delay=0.5e-3, 
@@ -1051,9 +1057,17 @@ class DataLogger( object ):
             sqlCommand = "UPDATE CIAO_%d_DataLoggers SET STREHL = %.4f, SEEING = %.4f, TAU0 = %.4f, TERR = %.4f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, self.Strehl, self.Seeing*self.Arcsec, self.Tau0, self.TemporalError, self.startTime)
             self.sqlCursor.execute(sqlCommand)
     
-    def measureVibs(self, frequencies=[], saveData=False):
+    def measureVibs(self, frequencies=[], modes='AVC', saveData=False):
         self.vibPower = {}
-        for Mode, i in zip(self.AVC.Modes.itervalues(), [0,1,2,7,8]):
+        if modes=='AVC':
+            extractedModes = [0, 1, 2, 7, 8]
+        elif modes=='ALL':
+            extractedModes = range(self.ZPowerCommands.shape[0])
+            self.AVC.setModes(extractedModes)
+        elif modes=='TEST':
+            extractedModes = [1, 2]
+            self.AVC.setModes(extractedModes)
+        for Mode, i in zip(self.AVC.Modes.itervalues(), extractedModes):
             self.vibPower[i] = {}
             commPower = {}
             slopesPower = {}
