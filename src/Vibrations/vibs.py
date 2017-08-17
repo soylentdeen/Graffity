@@ -17,8 +17,7 @@ CIAO_values = CIAO_DB.query(keywords=CIAO_keywords, timeOfDay='NIGHT',
 
 AVCModes = {}
 
-frequencies = [45.2, 46.8, 48.0, 74.0, 76.0, 78.0, 79.0, 81.5, 95.0,
-       97.5, 99.5, 115.0, 116.0, 119.0, 150.0]
+frequencies = [24.5, 48.0, 74.0, 76.0, 78.0, 97.0, 99.0] 
 
 Power={}
 Alt = {}
@@ -41,7 +40,7 @@ for CIAO_ID in [1,2, 3, 4]:
         print record[-3]
         dl.loadData()
         dl.computeStrehl()
-        dl.measureVibs(frequencies=frequencies, modes='ALL')
+        dl.measureVibs(frequencies=frequencies, modes='AVC')
         for key in dl.vibPower.keys():
             if not(key in Power[CIAO_ID].keys()):
                 Power[CIAO_ID][key] = {}

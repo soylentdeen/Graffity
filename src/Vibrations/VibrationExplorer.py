@@ -86,26 +86,34 @@ handles = []
 labels = []
 for CIAO_ID, ax in zip([1, 2, 3, 4], [ax1, ax2, ax3, ax4]):
     DL = CIAO[CIAO_ID]
+    Scale = 1e9*numpy.sqrt(DL.ZPowerdFrequencies)
     for mode in DL.vibPower.keys():
         f = []
         p = []
         for peak in DL.vibPower[mode]['CommPower'].iteritems():
             f.append(peak[0])
-            p.append(numpy.log10(peak[1]))
-        ax.plot(DL.ZPowerFrequencies, numpy.log10(DL.ZPowerCommands[mode,:]), color =
+            #p.append(numpy.log10(peak[1]))
+            p.append(numpy.sqrt(peak[1])*Scale)
+        #ax.plot(DL.ZPowerFrequencies, numpy.log10(DL.ZPowerCommands[mode,:]), color =
+        #        colors[mode])
+        ax.plot(DL.ZPowerFrequencies, numpy.sqrt(DL.ZPowerCommands[mode,:])*Scale, color =
                 colors[mode])
         ax.scatter(numpy.array(f), numpy.array(p), color=colors[mode],
                     label='Mode %d' % mode)
-        for freq in f:
-            ax.plot([f, f], [-20, -10], color='k', lw=0.1)
+        #for freq in f:
+        #    ax.plot([f, f], [0, 100], color='k', lw=0.1)
 
 handles, labels = ax.get_legend_handles_labels()
-ax1.set_ybound(-20, -11)
-ax2.set_ybound(-20, -11)
-ax3.set_ybound(-20, -11)
-ax4.set_ybound(-20, -11)
-ax2.xaxis.set_ticklabels([])
-ax4.xaxis.set_ticklabels([])
+ax1.set_ybound(0, 20)
+ax2.set_ybound(0, 20)
+ax3.set_ybound(0, 20)
+ax4.set_ybound(0, 20)
+ax1.set_xbound(0, 160)
+ax2.set_xbound(0, 160)
+ax3.set_xbound(0, 160)
+ax4.set_xbound(0, 160)
+#ax2.xaxis.set_ticklabels([])
+#ax4.xaxis.set_ticklabels([])
 
 fig.legend(handles, labels, ncol=4, loc=3, scatterpoints=1)
 fig.show()  
