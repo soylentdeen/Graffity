@@ -1071,6 +1071,7 @@ class DataLogger( object ):
             self.vibPower[i] = {}
             commPower = {}
             slopesPower = {}
+            self.flattenPSD(i)
             for j in range(10):
                 if Mode['Enabled'][j]:
                     freq = Mode['Frequencies'][j]
@@ -1082,6 +1083,21 @@ class DataLogger( object ):
                 slopesPower[f] = self.computeSlopesVibPower(i, f)
             self.vibPower[i]['CommPower'] = commPower
             self.vibPower[i]['SlopesPower'] = slopesPower
+
+    def flattenPSD(self, i):
+        window = self.ZPowerFrequencies > 15.0
+
+        SlopesA = numpy.log10(self.ZPowerSlopes[i,window])
+        CommsA = numpy.log10(self.ZPowerCommands[i,window])
+        model = numpy.array([numpy.ones(self.ZPowerFrequencies[window].shape), numpy.log10(self.ZPowerFrequencies[window])])
+        im = numpy.linalg.pinv(model)
+        SlopeSpectralSlope = im.T.dot(SlopesA.T)
+        CommSpectralSlope = im.T.dot(CommsA.T)
+
+        fullModel = numpy.array([numpy.ones(self.ZPowerFrequencies.shape), numpy.log10(self.ZPowerFrequencies)])
+        self.ZPowerSlopes[i] = self.ZPowerSlopes[i]/10.0**SlopeSpectralSlope.dot(fullModel)
+        self.ZPowerCommands[i] = self.ZPowerCommands[i]/10.0**CommSpectralSlope.dot(fullModel)
+
 
     def computeCommVibPower(self, mode, freq):
         Window = (self.ZPowerFrequencies > (freq - 1.0)) & (self.ZPowerFrequencies < 
@@ -1165,6 +1181,30 @@ class DataLogger( object ):
         self.ZSlopes = self.Gradients.dot(self.S2Z.T)
         self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
         
+    def pupilIllumination(self, ax):
+        Top = [0, 1, 2, 3, 4]
+        Bottom = [63, 64, 65, 66, 67]
+        Left = [12, 21, 30, 39, 48]
+        Right = [20, 29, 38, 47, 56]
+        NFrames = self.Intensities.shape[0]
+
+        for side in zip([Top, Bottom, Left, Right]):
+            Illumination = numpy.average(self.Intensities[:, side], axis=2)
+            Illumination = FourierDetrend(Illumination, 'TwoPoints')
+            Power = numpy.abs(numpy.fft.fft(Illumination/NFrames))**2.0
+            Freq = numpy.fft.fftfreq(NFrames, d=1.0/self.loopRate)
+            Power = numpy.fft.fftshift(Power)
+            Freq = numpy.fft.fftshift(Freq)
+            Power =  2.0*Power[Freq >= 0]
+            Freq = Freq[Freq>=0]
+            Power /= 2.0
+            Power = Power /numpy.mean(numpy.diff(Freq))
+            ax.plot(Freq, Power)
+
+        ax.set_yscale('log')
+        #ax.figure.show()
+        #print asdf
+
     def computePSD(self, source):
         NWindows = 1
         Resolution = 0.5
