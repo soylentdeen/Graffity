@@ -331,8 +331,13 @@ class GRAVITY_Dual_Sci_P2VM( object ):
         try:
             self.header = pyfits.getheader(self.filename, ext=10)
             self.data = pyfits.getdata(self.filename, ext=10)
-            self.getPupilMotion()
+            self.opdc = pyfits.getdata(self.filename, 'OPDC')
+            self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
+            self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
+            self.time = self.opdc.field('TIME')
+            #self.getPupilMotion()
         except:
+            print "Help!"
             pass
 
     def getPupilMotion(self):
@@ -354,6 +359,21 @@ class GRAVITY_Dual_Sci_P2VM( object ):
             self.PUPIL_U[UT] = self.data.field('PUPIL_U')[UT-1::4]
             self.PUPIL_V[UT] = self.data.field('PUPIL_V')[UT-1::4]
             self.PUPIL_W[UT] = self.data.field('PUPIL_W')[UT-1::4]
+
+    def computeOPDPeriodograms(self):
+        M_matrix = numpy.array([-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,-1.,0.0,0.0,1.,0.0,-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,0.0,-1.,1.]);
+        M_matrix = M_matrix.reshape((6, 4))
+
+        opdc_kalman_pizeo_opd = numpy.dot(M_matrix,
+                self.opdc_kalman_piezo.T).T
+        PSD_k = [1, 2, 3, 4, 5, 6]
+        for baseline in range(0, 6):
+            f_k, PSD_k[baseline] = signal.welch(opdc_kalman_pizeo_opd[:,baseline],
+                    fs=(1./numpy.nanmean(numpy.diff(self.time))), detrend='linear',
+                    nperseg=1024, scaling='spectrum')
+
+            PSD_k[baseline] = numpy.sqrt(PSD_k[baseline])*1000.0
+        self.PSD_k = PSD_k
 
 
 

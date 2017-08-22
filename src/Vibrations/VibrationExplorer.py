@@ -39,6 +39,11 @@ def getDataLoggers(DB, GravityVals, startTime):
         i += 1
 
     index = int(raw_input("Enter desired index :")) - 1
+    FT_OPDS = Graffity.GRAVITY_Data(GravityVals[index][-1])
+    FT_OPDS.DualSciP2VM.computeOPDPeriodograms()
+    return FT_OPDS
+    """
+    print asdf
     freqs = getFreqs()
     Modes = getModes()
 
@@ -55,6 +60,7 @@ def getDataLoggers(DB, GravityVals, startTime):
         DataLoggers[UT].measureVibs(frequencies=freqs, modes=Modes)
 
     return DataLoggers
+    """
 
 fig = pyplot.figure(0, figsize=(8.0, 10.0), frameon=False)
 fig.clear()
@@ -73,7 +79,7 @@ startTime = '2017-08-08 00:00:00'
 GravityVals = GDB.query(keywords = [], timeOfDay='NIGHT', startTime=startTime)
 
 CIAO = getDataLoggers(CDB, GravityVals, startTime)
-
+print asdf
 hsv = [(numpy.random.uniform(low=0.0, high=1),
            numpy.random.uniform(low=0.2, high=1),
            numpy.random.uniform(low=0.9, high=1)) for i in
