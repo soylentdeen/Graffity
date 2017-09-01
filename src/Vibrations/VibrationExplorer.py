@@ -30,7 +30,7 @@ def getModes():
         if enteredText == 'ALL':
             return 'ALL'
 
-def getDataLoggers(DB, GravityVals, startTime):
+def getDataLoggers(DB, GravityVals, startTime, ax=None):
     order = numpy.argsort(GravityVals[:,-2])
     GravityVals = GravityVals[order]
     i = 1
@@ -39,13 +39,12 @@ def getDataLoggers(DB, GravityVals, startTime):
         i += 1
 
     index = int(raw_input("Enter desired index :")) - 1
-    FT_OPDS = Graffity.GRAVITY_Data(GravityVals[index][-1])
-    FT_OPDS.DualSciP2VM.computeOPDPeriodograms()
-    return FT_OPDS
-    """
-    print asdf
-    freqs = getFreqs()
-    Modes = getModes()
+    FTData = Graffity.GRAVITY_Data(GravityVals[index][-1])
+    FTData.DualSciP2VM.computeOPDPeriodograms()
+    VibrationPeaks = FTData.DualSciP2VM.findVibrationPeaks()
+
+    #freqs = getFreqs()
+    #Modes = getModes()
 
     CIAOVals = DB.query(keywords=['ALT', 'AZ', 'STREHL'], timeOfDay='NIGHT', startTime=startTime)
 
@@ -57,10 +56,20 @@ def getDataLoggers(DB, GravityVals, startTime):
         DataLoggers[UT] = Graffity.DataLogger(directory=CIAOVals[UT][closest,-3])
         DataLoggers[UT].loadData()
         DataLoggers[UT].computeStrehl()
-        DataLoggers[UT].measureVibs(frequencies=freqs, modes=Modes)
+        freqs = extractBCIFreqs(VibrationPeaks, UT)
+        DataLoggers[UT].measureVibs(frequencies=freqs, modes='AVC')
 
-    return DataLoggers
-    """
+    return DataLoggers, VibrationPeaks
+
+def extractBCIFreqs(VibrationPeaks, UT):
+    freqs = []
+    baselines = {0:[4,3], 1:[4, 2], 2:[4, 1], 3:[3, 2], 4:[3, 1], 5:[2, 1]}
+    for bl in baselines.keys():
+        if UT in baselines[bl]:
+            for f in VibrationPeaks[bl]['freqs']:
+                freqs.append(f)
+    return numpy.array(freqs)
+
 
 fig = pyplot.figure(0, figsize=(8.0, 10.0), frameon=False)
 fig.clear()
@@ -74,12 +83,14 @@ ax4.yaxis.tick_right()
 GDB = CIAO_DatabaseTools.GRAVITY_Database()
 CDB = CIAO_DatabaseTools.CIAO_Database()
 
-startTime = '2017-08-08 00:00:00'
+startTime = '2017-08-10 00:00:00'
 
 GravityVals = GDB.query(keywords = [], timeOfDay='NIGHT', startTime=startTime)
 
-CIAO = getDataLoggers(CDB, GravityVals, startTime)
-print asdf
+#ax1.set_xscale('log')
+#ax1.set_yscale('log')
+CIAO, Vibrations = getDataLoggers(CDB, GravityVals, startTime, ax=ax1)
+
 hsv = [(numpy.random.uniform(low=0.0, high=1),
            numpy.random.uniform(low=0.2, high=1),
            numpy.random.uniform(low=0.9, high=1)) for i in
@@ -88,51 +99,63 @@ colors = []
 for h in hsv:
     colors.append(colorsys.hsv_to_rgb(h[0], h[1], h[2]))
 
-handles = []
-labels = []
+handles = numpy.array([])
+labels = numpy.array([])
+baselines = {0:[4,3], 1:[4, 2], 2:[4, 1], 3:[3, 2], 4:[3, 1], 5:[2, 1]}
+colors = {0:'y', 1:'g', 2:'r', 3:'c', 4:'m', 5:'k'}
 for CIAO_ID, ax in zip([1, 2, 3, 4], [ax1, ax2, ax3, ax4]):
     DL = CIAO[CIAO_ID]
-    DL.pupilIllumination(ax)
-    Scale = 1e9*numpy.sqrt(DL.ZPowerdFrequencies)
-    """
     for mode in DL.vibPower.keys():
+        BCIVibs = {}
+        for bl in baselines.keys():
+            if CIAO_ID in baselines[bl]:
+                label = "UT%dUT%d" % (baselines[bl][0], baselines[bl][1])
+                BCIVibs[label] = {'index':bl, 'power':[]}
         f = []
         p = []
         for peak in DL.vibPower[mode]['CommPower'].iteritems():
-            f.append(peak[0])
-            #p.append(numpy.log10(peak[1]))
-            #p.append(numpy.sqrt(peak[1])*Scale)
-            p.append(peak[1])
+            if peak[1] > 0:
+                f.append(peak[0])
+                p.append(numpy.log10(peak[1]))
+                for label in BCIVibs.keys():
+                    if not( f[-1] in Vibrations[BCIVibs[label]['index']]['freqs']):
+                        BCIVibs[label]['power'].append(0.0)
+                    else:
+                        for i, freq in enumerate(Vibrations[BCIVibs[label]['index']]['freqs']):
+                            if freq == f[-1]:
+                                BCIVibs[label]['power'].append(Vibrations[BCIVibs[label]['index']]['power'][i])
+        
         #ax.plot(DL.ZPowerFrequencies, numpy.log10(DL.ZPowerCommands[mode,:]), color =
         #        colors[mode])
-        #ax.plot(DL.ZPowerFrequencies, numpy.sqrt(DL.ZPowerCommands[mode,:])*Scale, color =
-        #        colors[mode])
-        ax.plot(DL.ZPowerFrequencies, DL.ZPowerCommands[mode,:], color =
-                colors[mode])
-        ax.scatter(numpy.array(f), numpy.array(p), color=colors[mode],
-                    label='Mode %d' % mode)
-        #for freq in f:
-        #    ax.plot([f, f], [0, 100], color='k', lw=0.1)
-"""
-#handles, labels = ax.get_legend_handles_labels()
+        f = numpy.array(f)
+        p = numpy.array(p)
+        ax.scatter(numpy.log10(f), p, color='b')
+        for bl in BCIVibs.keys():
+            BCIVibs[bl]['power'] = numpy.array(BCIVibs[bl]['power'])
+            nonzero = BCIVibs[bl]['power'] > 0.0
+            ax.scatter(numpy.log10(f[nonzero]), numpy.log10(BCIVibs[bl]['power'][nonzero]),
+                    label=bl, color = colors[BCIVibs[bl]['index']])
+        #ax.scatter(numpy.array(f), numpy.array(p), color=colors[mode],
+        #            label='Mode %d' % mode)
+        
+        h, l = ax.get_legend_handles_labels()
+        handles=numpy.append(handles, numpy.array(h))
+        labels =numpy.append(labels, numpy.array(l))
+
+
 #ax1.set_ybound(0, 20)
 #ax2.set_ybound(0, 20)
 #ax3.set_ybound(0, 20)
 #ax4.set_ybound(0, 20)
-ax1.set_xbound(0, 160)
-ax2.set_xbound(0, 160)
-ax3.set_xbound(0, 160)
-ax4.set_xbound(0, 160)
-ax1.text(0.05, 0.05, 'UT1', transform=ax1.transAxes)
-ax2.text(0.05, 0.05, 'UT2', transform=ax2.transAxes)
-ax3.text(0.05, 0.05, 'UT3', transform=ax3.transAxes)
-ax4.text(0.05, 0.05, 'UT4', transform=ax4.transAxes)
+#ax1.set_xbound(0, 160)
+#ax2.set_xbound(0, 160)
+#ax3.set_xbound(0, 160)
+#ax4.set_xbound(0, 160)
 #ax2.xaxis.set_ticklabels([])
 #ax4.xaxis.set_ticklabels([])
 
-#fig.legend(handles, labels, ncol=4, loc=3, scatterpoints=1)
-#"""
-ax1.set_xlabel("Frequency (Hz)")
-ax1.set_ylabel("FFT of Edge Subaperture Illumination")
+junk, indices = numpy.unique(labels, return_index=True)
+
+fig.legend(handles[indices], labels[indices], ncol=4, loc=3, scatterpoints=1)
 fig.show()  
-fig.savefig("PupilIllumination.png")
+#"""

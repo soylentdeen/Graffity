@@ -334,7 +334,7 @@ class GRAVITY_Dual_Sci_P2VM( object ):
             self.opdc = pyfits.getdata(self.filename, 'OPDC')
             self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
             self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
-            self.time = self.opdc.field('TIME')
+            self.time = self.opdc.field('TIME')/1e6
             #self.getPupilMotion()
         except:
             print "Help!"
@@ -374,6 +374,51 @@ class GRAVITY_Dual_Sci_P2VM( object ):
 
             PSD_k[baseline] = numpy.sqrt(PSD_k[baseline])*1000.0
         self.PSD_k = PSD_k
+        self.f_k = f_k
+
+    def findVibrationPeaks(self, ax=None):
+        self.flattenPSDs()
+        self.peaks = {}
+        for baseline in range(0,6):
+            self.peaks[baseline] = {}
+            peaks = scipy.signal.find_peaks_cwt(self.flattenedPSD_k[baseline],
+                    numpy.arange(5,10))
+            diffs = self.f_k[numpy.diff(peaks)]
+            self.peaks[baseline]['freqs'] = []
+            self.peaks[baseline]['power'] = []
+            for i in range(len(diffs)):
+                if diffs[i] > 3:
+                    window = range(numpy.max([0, peaks[i]-3]), numpy.min([len(self.f_k), peaks[i]+3]))
+                    self.peaks[baseline]['freqs'].append(self.f_k[peaks[i]])
+                    self.peaks[baseline]['power'].append(scipy.integrate.trapz(self.PSD_k[baseline][window],
+                                                 x=self.f_k[window]))
+
+            self.peaks[baseline]['freqs'] = numpy.array(self.peaks[baseline]['freqs'])
+            self.peaks[baseline]['power'] = numpy.array(self.peaks[baseline]['power'])
+            
+            if ax != None:
+                #ax.clear()
+                ax.set_xscale('linear')
+                ax.set_yscale('linear')
+                ax.plot(self.f_k, self.PSD_k[baseline])
+                ax.figure.show()
+                raw_input()
+
+        return self.peaks
+
+
+
+    def flattenPSDs(self):
+        window = self.f_k > 15.0
+        self.flattenedPSD_k = []
+        for baseline in range(0,6):
+            A = numpy.log10(self.PSD_k[baseline][window])
+            model = numpy.array([numpy.ones(self.f_k[window].shape), numpy.log10(self.f_k[window])])
+            im = numpy.linalg.pinv(model)
+            SpectralSlope = im.T.dot(A.T)
+
+            fullModel = numpy.array([numpy.ones(self.f_k.shape), numpy.log10(self.f_k)])
+            self.flattenedPSD_k.append(self.PSD_k[baseline]/10.0**SpectralSlope.dot(fullModel))
 
 
 
@@ -1091,13 +1136,12 @@ class DataLogger( object ):
             self.vibPower[i] = {}
             commPower = {}
             slopesPower = {}
-            self.flattenPSD(i)
-            for j in range(10):
-                if Mode['Enabled'][j]:
-                    freq = Mode['Frequencies'][j]
-                    commPower[freq]=self.computeCommVibPower(i, Mode['Frequencies'][j])
-                    slopesPower[freq]=self.computeSlopesVibPower(i, Mode['Frequencies'][j])
-
+            #self.flattenPSD(i)
+            #for j in range(10):
+            #    if Mode['Enabled'][j]:
+            #        freq = Mode['Frequencies'][j]
+            #        commPower[freq]=self.computeCommVibPower(i, Mode['Frequencies'][j])
+            #        slopesPower[freq]=self.computeSlopesVibPower(i, Mode['Frequencies'][j])
             for f in frequencies:
                 commPower[f] = self.computeCommVibPower(i, f)
                 slopesPower[f] = self.computeSlopesVibPower(i, f)
