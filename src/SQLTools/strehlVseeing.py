@@ -38,9 +38,10 @@ for i in numpy.arange(4):
     Strehl[ciaoID] = data[:,0]
     Seeing[ciaoID] = data[:,1]
 
-    ax.scatter(data[:,2], data[:,0], color = colors[i])
+    ax.scatter(data[:,1], data[:,0], color = colors[i])
 
 fig.show()
+fig.savefig("StrelVSeeing.png")
 
 cursor.close()
 connection.close()
