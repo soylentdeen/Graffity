@@ -42,6 +42,7 @@ def getDataLoggers(DB, GravityVals, startTime, ax=None):
     FTData = Graffity.GRAVITY_Data(GravityVals[index][-1])
     FTData.DualSciP2VM.computeOPDPeriodograms()
     VibrationPeaks = FTData.DualSciP2VM.findVibrationPeaks()
+    FTData.computeACQCAMStrehl()
 
     #freqs = getFreqs()
     #Modes = getModes()
