@@ -3,6 +3,12 @@ from matplotlib import pyplot
 import numpy
 import scipy
 import glob
+import sys
+
+sys.path.append('../')
+import CIAO_DatabaseTools
+import Graffity
+import astropy.time as aptime
 
 class BCI_Data(object):
     def __init__(self, data=None, error=None):
@@ -84,7 +90,8 @@ class BCI_Data(object):
         return new
 
 class AcqCamData( object ):
-    def __init__(self, fiberData=None, fluxData=None):
+    def __init__(self, fiberData=None, fluxData=None, FTMag=0.0, AcqDit=0.0,
+            CIAO_Data = None):
         self.Time = BCI_Data(data=fiberData.field('TIME'))
         self.Strehl = BCI_Data(data=fiberData.field('FIELD_STREHL'))
         self.SC_X = BCI_Data(data=fiberData.field('FIELD_SC_X'), error=fiberData.field('FIELD_SC_XERR'))
@@ -108,6 +115,10 @@ class AcqCamData( object ):
         self.TOTALFLUX_SC = BCI_Data(fluxData.field('TOTALFLUX_SC'))
         self.TOTALFLUX_FT = BCI_Data(fluxData.field('TOTALFLUX_FT'))
 
+        self.FTMag = FTMag
+        self.AcqDit = AcqDit
+        self.CIAO_Data = CIAO_Data
+
     def binData(self):
         self.newStrehl = self.Strehl.rebin(self.Time, self.BCI_Time)
         self.newSC_X = self.SC_X.rebin(self.Time, self.BCI_Time)
@@ -117,7 +128,6 @@ class AcqCamData( object ):
         self.newSCALE = self.SCALE.rebin(self.Time, self.BCI_Time)
         self.newSC_FIBER_DX = self.SC_FIBER_DX.rebin(self.Time, self.BCI_Time)
         self.newSC_FIBER_DY = self.SC_FIBER_DY.rebin(self.Time, self.BCI_Time)
-        
 
     def findCorrelations(self, ax=None):
         colors = ['b', 'g', 'r', 'c']
@@ -164,27 +174,15 @@ class AcqCamData( object ):
                     ax.errorbar(self.SC_X.data[i], self.SC_Y.data[i], xerr=self.SC_X.error[i], yerr=self.SC_Y.error[i], c=color)
                     ax.errorbar(self.FT_X.data[i], self.FT_Y.data[i], xerr=self.FT_X.error[i], yerr=self.FT_Y.error[i], c=color)
                 elif name == 'FLUX':
-                    ax.plot(self.BCI_Time.data[i], self.TOTALFLUX_SC.data[i]/medianTOTALFLUX_SC[i], c=color)
+                    ax.plotlways (self.BCI_Time.data[i], self.TOTALFLUX_SC.data[i]/medianTOTALFLUX_SC[i], c=color)
                     ax.plot(self.BCI_Time.data[i], self.TOTALFLUX_FT.data[i]/medianTOTALFLUX_FT[i], c=color)
                 elif name == 'SCALE':
-                    #ax.errorbar(self.Time.data[i], self.SCALE.data[i], yerr=self.SCALE.error[i], c=color)
                     ax.errorbar(self.BCI_Time.data[i], self.newSCALE.data[i]-medianSCALE[i], yerr=self.newSCALE.error[i], c=color)
                 elif name == 'FIBER':
-                    #ax.errorbar(self.Time.data[i], self.FIBER_DELTA.data[i], yerr=self.FIBER_DELTA_ERR.data[i], c=color)
-                    #ax.errorbar(self.Time.data[i], self.SC_FIBER_DX.data[i], yerr=self.SC_FIBER_DX.error[i], c=color, ls='-')
-                    #ax.errorbar(self.Time.data[i], self.SC_FIBER_DY.data[i], yerr=self.SC_FIBER_DY.error[i], c=color, ls='-.')
                     ax.errorbar(self.BCI_Time.data[i], self.newSC_FIBER_DX.data[i], yerr=self.newSC_FIBER_DX.error[i], c=color, ls='-')
                     ax.errorbar(self.BCI_Time.data[i], self.newSC_FIBER_DY.data[i], yerr=self.newSC_FIBER_DY.error[i], c=color, ls='-.')
-                    #ax.plot(self.Time.data[i], self.SC_FIBER_DX.data[i], c=color)
-                    #ax.plot(self.Time.data[i], self.SC_FIBER_DY.data[i], c=color)
-                    #ax.plot(self.BCI_Time.data[i], self.newSC_FIBER_DX.data[i]-medianSC_FIBER_DX[i], c=color)
-                    #ax.plot(self.BCI_Time.data[i], self.newSC_FIBER_DY.data[i]-medianSC_FIBER_DY[i], c=color)
                 elif name == 'STREHL':
-                    #ax.plot(self.Time.data[i], self.Strehl.data[i], c=color)
                     ax.plot(self.BCI_Time.data[i], self.newStrehl.data[i]/medianStrehl[i], c=color)
-
-
-df = '/home/cdeen/Data/GRAVITY/2017-08/2017-08-09/reduced/GRAVI.2017-08-10T00:35:33.638_dualcalp2vmred.fits'
 
 
 def findCorrelations(AcqFiles=[], ax=None):
@@ -194,43 +192,69 @@ def findCorrelations(AcqFiles=[], ax=None):
     linex = numpy.array([numpy.ones(50), numpy.linspace(0, 0.3)])
     difference = {}
     strehl = {}
-    for i in range(4):
+    cov = {}
+
+    for i,j in zip(range(4), [3, 2, 1,0]):
         A = []
         x = []
         strehl[i] = []
         for Acq in AcqFiles:
-            for SR, flux, dx, dy, sc in zip(Acq.newStrehl.data[i], Acq.TOTALFLUX_FT.data[i], Acq.newSC_FIBER_DX.data[i], Acq.newSC_FIBER_DY.data[i], Acq.newSCALE.data[i]):
-                if not(numpy.isnan(SR)):
-                    strehl[i].append(SR)
-                    #A.append([1.0, SR/numpy.max(Acq.newStrehl.data[i])])
-                    #x.append(flux / Acq.TOTALFLUX_FT.median[i])
-                    A.append([1.0, SR])
-                    #A.append([1.0, SR, (dx**2.0+dy**2.0)**0.5])
-                    #A.append([1.0, SR, dx, dy])
-                    #A.append([1.0, SR, dx, dy, sc])
-                    x.append(flux )
-                    if ax != None:
-                        #ax.scatter([SR/numpy.max(Acq.newStrehl.data[i])], [flux/Acq.TOTALFLUX_FT.median[i]], c=colors[i])
-                        ax[0].scatter([SR], [flux], c=colors[i])
+            for SR, flux, dx, dy, sc in zip(Acq.newStrehl.data[i],
+                    Acq.TOTALFLUX_FT.data[i], Acq.newSC_FIBER_DX.data[i],
+                    Acq.newSC_FIBER_DY.data[i], Acq.newSCALE.data[i]):
+                strehlAccumulator = []
+                if (not(numpy.isnan(SR)) and (SR > 0) and (SR < 0.5) and
+                        (Acq.FTMag == 9.7)):
+                    if (flux > -150000):
+                        strehl[i].append(SR)
+                        strehlAccumulator.append(SR)
+                        #A.append([1.0, SR/numpy.max(Acq.newStrehl.data[i])])
+                        #x.append(flux / Acq.TOTALFLUX_FT.median[i])
+                        #A.append([1.0, SR])
+                        #A.append([1.0, SR, 10.0**(-2.5*Acq.FTMag)*Acq.AcqDit])
+                        A.append([1.0, SR, 10.0**(-2.5*Acq.FTMag)*Acq.AcqDit,
+                            Acq.CIAO_Data[j]["Strehl"],
+                            Acq.CIAO_Data[j]["Seeing"],
+                            Acq.CIAO_Data[j]["Tau0"]])
+                            #Acq.CIAO_Data[j]["WindSp"]])
+                        #A.append([1.0, SR, (dx**2.0+dy**2.0)**0.5])
+                        #A.append([1.0, SR, dx, dy])
+                        #A.append([1.0, SR, dx, dy, sc])
+                        x.append(flux )
+                        if ax != None:
+                            #ax.scatter([SR/numpy.max(Acq.newStrehl.data[i])], [flux/Acq.TOTALFLUX_FT.median[i]], c=colors[i])
+                            ax[0].scatter([SR], [flux], c=colors[i])
+            #if ax!= None:
+            #    ax[0].scatter([numpy.mean(numpy.array(strehlAccumulator))],
+            #            [Acq.CIAO_Data[j]["Strehl"]], c=colors[i])
+                            
 
-        A = numpy.array(A)
-        x = numpy.array(x)
-        B = numpy.linalg.pinv(A)
-        fit = B.dot(x)
-        if ax != None:
+        """
+        #A = numpy.array(A, dtype=float)
+        #x = numpy.array(x)
+        #B = numpy.linalg.pinv(A)
+        #fit = B.dot(x)
+        #if ax != None:
             #ax.plot(linex[1], fit.dot(linex), c=colors[i])
-            ax[0].scatter(A[:,1], fit.dot(A.T), c=colors[i], marker='.')
+            #ax[0].scatter(A[:,1], fit.dot(A.T), c=colors[i], marker='.')
 
-            for blah, junk, fart in zip(A, x, fit.dot(A.T)):
-                ax[0].plot([blah[1], blah[1]], [junk, fart], c=colors[i])
-        difference[i] = numpy.mean(numpy.sqrt(((x - fit.dot(A.T))**2.0/fit.dot(A.T))))
-        print difference[i]
-        strehl[i] = numpy.array(strehl[i])
+            #for blah, junk, fart in zip(A, x, fit.dot(A.T)):
+            #    ax[0].plot([blah[1], blah[1]], [junk, fart], c=colors[i])
+        #difference[i] = numpy.mean(numpy.sqrt(((x - fit.dot(A.T))**2.0/fit.dot(A.T))))
+        #print difference[i]
+        #print fit, A.shape
 
-    for i in range(4):
-        for j in range(i+1, 4):
-            print "Correlation between Strehls of Telescopes ", i, " and ", j, ": ", numpy.corrcoef(strehl[i], strehl[j])
+        #n = A.shape[0]
+        #avg = numpy.mean(A, axis=0)
+        #cov[i] = 1.0/n * (A - avg).T.dot(A-avg)
+        #strehl[i] = numpy.array(strehl[i])
 
+    ax[0].set_xlabel("H-band AcqCam Strehl")
+    ax[0].set_ylabel("FT Flux")
+    #for i in range(4):
+    #    for j in range(i+1, 4):
+    #        print "Correlation between Strehls of Telescopes ", i, " and ", j, ": ", numpy.corrcoef(strehl[i], strehl[j])
+    """
     if ax != None:
         ax[1].clear()
         ax[1].plot(strehl[0], c=colors[0])
@@ -238,7 +262,8 @@ def findCorrelations(AcqFiles=[], ax=None):
         ax[1].plot(strehl[2], c=colors[2])
         ax[1].plot(strehl[3], c=colors[3])
 
-    
+    return 0#cov
+    #"""
 
 
 fig1 = pyplot.figure(0)
@@ -262,28 +287,72 @@ fig5.clear()
 ax5 = fig5.add_axes([0.1, 0.1, 0.8, 0.8])
 ax5.set_title("Strehl")
 
+fig6 = pyplot.figure(5)
+fig6.clear()
+ax61 = fig6.add_axes([0.1, 0.1, 0.4, 0.4])
+ax62 = fig6.add_axes([0.1, 0.5, 0.4, 0.4])
+ax63 = fig6.add_axes([0.5, 0.1, 0.4, 0.4])
+ax64 = fig6.add_axes([0.5, 0.5, 0.4, 0.4])
+fig6.suptitle("Covariances")
+
 axes = [ax1, ax2, ax3, ax4, ax5]
 
-files = glob.glob('/home/cdeen/Data/GRAVITY/2017-08/2017-08-09/reduced/GRAVI*dualscip2vmred.fits')
+#files = glob.glob('/home/grav/cdeen/GRAVITY/reduced/GRAVI*singlescip2vmred.fits')
+files = glob.glob('/home/grav/cdeen/GRAVITY/reduced/GRAVI.2017-07*dualscip2vmred.fits')
 
 AcqFiles = []
 
+CDB = CIAO_DatabaseTools.CIAO_Database()
+CIAO_DataLoggers = CDB.query(keywords = ["TAU0", "STREHL", "SEEING", "WINDSP"])
+
+#for df in['/home/grav/cdeen/GRAVITY/reduced/GRAVI.2017-08-09T01:12:28.341_dualscip2vmred.fits']:
 for df in files:
-    fiberData = pyfits.getdata(df, ext=16)
-    fluxData = pyfits.getdata(df, ext=8)
-    AcqFiles.append(AcqCamData(fiberData=fiberData, fluxData=fluxData))
-    AcqFiles[-1].binData()
-    blah = AcqFiles[-1].calcMedian()
+    data = pyfits.open(df)
+    if len(data) > 16:
+        fiberData = pyfits.getdata(df, ext=16)
+        fluxData = pyfits.getdata(df, ext=10)
+        FTMag = pyfits.getheader(df).get('ESO FT ROBJ MAG')
+        AcqDit = data[0].header.get('ESO DET1 SEQ1 DIT')
+        print FTMag, AcqDit
+        time = aptime.Time(data[0].header.get('ESO PCR ACQ START'))
+        CIAO_Data = {}
+        good = True
+        for i in [1,2, 3, 4]:
+            CIAO_Data[i-1] = {}
+            times = numpy.array(CIAO_DataLoggers[i][:,-4], dtype=float)
+            closest = numpy.argsort(numpy.abs(times-time.mjd))[0]
+            if numpy.abs(times[closest] - time.mjd) > (1.0/(24.0*3600/30.0)):
+                print "Ruh-roh!  Difference in time is greater than 30 seconds!"
+                good = False
+            else:
+                print "Time Difference = ", (times[closest] - time.mjd)*24*3600.0
+                CIAO_Data[i-1]["Tau0"] = CIAO_DataLoggers[i][closest,0]
+                CIAO_Data[i-1]["Strehl"] = CIAO_DataLoggers[i][closest,1]
+                CIAO_Data[i-1]["Seeing"] = CIAO_DataLoggers[i][closest,2]
+                CIAO_Data[i-1]["WindSp"] = CIAO_DataLoggers[i][closest,3]
+                print CIAO_Data[i-1]
+        if good:
+            AcqFiles.append(AcqCamData(fiberData=fiberData,
+                 fluxData=fluxData,FTMag=FTMag, AcqDit=AcqDit, CIAO_Data = CIAO_Data))
+            AcqFiles[-1].binData()
+            blah = AcqFiles[-1].calcMedian()
+    else:
+        print "%s does not have all required tables!" % df
+    data.close()
 
 
-findCorrelations(AcqFiles, ax=[ax1, ax2])
+covar = findCorrelations(AcqFiles, ax=[ax1, ax2])
+
+#for cov, ax in zip(covar.keys(), [ax61, ax62, ax63, ax64]):
+#    ax.matshow(numpy.log10(covar[cov][1:,1:]**2.0), vmin=-20)
 
 #Acq.binData()
 #Acq.plot(axes=axes)
 #Acq.findCorrelations(ax1)
 
 fig1.show()
-#fig2.show()
+fig2.show()
 #fig3.show()
 #fig4.show()
 #fig5.show()
+#fig6.show()

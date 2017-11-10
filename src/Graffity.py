@@ -19,6 +19,146 @@ import time
 from datetime import datetime
 from astropy import time as aptime
 
+class BCI_Data(object):
+    def __init__(self, data=None, error=None):
+        self.data = {}
+        self.error = None
+        if data != None:
+            for i in range(4):
+                self.data[i] = data[i::4]
+                if error != None:
+                    if self.error == None:
+                        self.error = {}
+                    self.error[i] = error[i::4]
+
+    def __pow__(self, power):
+        for i in self.data.keys():
+            if self.error != None:
+                self.error[i] = power * self.data[i]*self.error[i]
+            self.data[i] = self.data[i]**power
+        return self
+
+    def __add__(self, other):
+        for i in self.data.keys():
+            if self.error != None:
+                self.error[i] = numpy.sqrt(self.error[i]**2.0 +other.error[i]**2.0)
+            self.data[i] = self.data[i] + other.data[i]
+        return self
+
+    def getMedian(self):
+        retval = {}
+        for i in self.data.keys():
+            retval[i] = numpy.median(self.data[i])
+
+        self.median = retval
+        return retval
+
+    def rebin(self, time, otherTime, debug=False):
+        new = BCI_Data()
+        if self.error != None:
+            new.error = {}
+        for i in self.data.keys():
+            new.data[i] = []
+            #time.data[i] = time.data[i][time.data[i] != 0]
+            if self.error != None:
+                new.error[i] = []
+            startTime = otherTime.data[i][0] - numpy.mean(numpy.diff(otherTime.data[i]))
+            stopTime = (otherTime.data[i][1] + otherTime.data[i][0]) / 2.0
+            included = (startTime < time.data[i]) & (stopTime > time.data[i]) & (self.data[i] != 0)
+            if self.error != None:
+                new.data[i].append(numpy.sum(self.data[i][included]/self.error[i][included])/numpy.sum(
+                              1.0/self.error[i][included]))
+                new.error[i].append(numpy.sum(self.error[i][included]**-2.0)**-0.5)
+            else:
+                new.data[i].append(numpy.mean(self.data[i][included]))
+            for t in range(len(otherTime.data[i])-2):
+                startTime = (otherTime.data[i][t]+otherTime.data[i][t+1])/2.0
+                stopTime = (otherTime.data[i][t+1]+otherTime.data[i][t+2])/2.0
+                included = (startTime < time.data[i]) & (stopTime > time.data[i]) & (self.data[i] != 0)
+                if self.error != None:
+                    new.data[i].append(numpy.sum(self.data[i][included]/
+                                       self.error[i][included])/numpy.sum(1.0/self.error[i][included]))
+                    new.error[i].append(numpy.sum(self.error[i][included]**-2.0)**-0.5)
+                    if debug:
+                        print new.data[i][-1], new.error[i][-1], numpy.mean(self.data[i][included])
+                        raw_input()
+                else:
+                    new.data[i].append(numpy.mean(self.data[i][included]))
+            startTime = otherTime.data[i][-2] + numpy.mean(numpy.diff(otherTime.data[i]))/2.0
+            stopTime = otherTime.data[i][-1]
+            included = (startTime < time.data[i]) & (stopTime > time.data[i]) & (self.data[i] != 0)
+            if self.error != None:
+                new.data[i].append(numpy.sum(self.data[i][included]/
+                                   self.error[i][included])/numpy.sum(1.0/self.error[i][included]))
+                new.error[i].append(numpy.sum(self.error[i][included]**-2.0)**-0.5)
+            else:
+                new.data[i].append(numpy.mean(self.data[i][included]))
+
+            new.data[i] = numpy.array(new.data[i])
+            if self.error != None:
+                new.error[i] = numpy.array(new.error[i])
+        return new
+
+class AcqCamData( object ):
+    def __init__(self, fiberData=None, fluxData=None, FTMag=0.0, SCMag= 0.0, AcqDit=0.0,
+            CIAO_Data =None):
+        self.Time = BCI_Data(data=fiberData.field('TIME'))
+        self.Strehl = BCI_Data(data=fiberData.field('FIELD_STREHL'))
+        self.SC_X = BCI_Data(data=fiberData.field('FIELD_SC_X'), error=fiberData.field('FIELD_SC_XERR'))
+        self.SC_Y = BCI_Data(data=fiberData.field('FIELD_SC_Y'), error=fiberData.field('FIELD_SC_YERR'))
+        self.FT_X = BCI_Data(data=fiberData.field('FIELD_FT_X'), error=fiberData.field('FIELD_FT_XERR'))
+        self.FT_Y = BCI_Data(data=fiberData.field('FIELD_FT_Y'), error=fiberData.field('FIELD_FT_YERR'))
+        self.SCALE = BCI_Data(data=fiberData.field('FIELD_SCALE'), error=fiberData.field('FIELD_SCALEERR'))
+        self.SC_FIBER_DX = BCI_Data(data=fiberData.field('FIELD_SC_FIBER_DX'), error=fiberData.field('FIELD_SC_FIBER_DXERR'))
+        self.SC_FIBER_DY = BCI_Data(data=fiberData.field('FIELD_SC_FIBER_DY'), error=fiberData.field('FIELD_SC_FIBER_DYERR'))
+        self.Pupil_X = BCI_Data(data=fiberData.field('PUPIL_X'))
+        self.Pupil_Y = BCI_Data(data=fiberData.field('PUPIL_Y'))
+        self.Pupil_Z = BCI_Data(data=fiberData.field('PUPIL_Z'))
+        self.Pupil_R = BCI_Data(data=fiberData.field('PUPIL_R'))
+        self.Pupil_U = BCI_Data(data=fiberData.field('PUPIL_U'))
+        self.Pupil_V = BCI_Data(data=fiberData.field('PUPIL_V'))
+        self.Pupil_W = BCI_Data(data=fiberData.field('PUPIL_W'))
+        self.OPD_Pupil = BCI_Data(data=fiberData.field('OPD_PUPIL'))
+
+        self.BCI_Time = BCI_Data(fluxData.field('TIME'))
+        self.TOTALFLUX_SC = BCI_Data(fluxData.field('TOTALFLUX_SC'))
+        self.TOTALFLUX_FT = BCI_Data(fluxData.field('TOTALFLUX_FT'))
+        self.FDDL = BCI_Data(fluxData.field('FDDL'))
+        self.FT_Pos = BCI_Data(fluxData.field('FT_POS'))
+        self.SC_Pos = BCI_Data(fluxData.field('SC_POS'))
+
+        self.FTMag = FTMag
+        self.SCMag = SCMag
+        self.AcqDit = AcqDit
+        self.CIAO_Data = CIAO_Data
+
+    def binData(self):
+        self.newStrehl = self.Strehl.rebin(self.Time, self.BCI_Time)
+        self.newSC_X = self.SC_X.rebin(self.Time, self.BCI_Time)
+        self.newSC_Y = self.SC_Y.rebin(self.Time, self.BCI_Time)
+        self.newFT_X = self.FT_X.rebin(self.Time, self.BCI_Time)
+        self.newFT_Y = self.FT_Y.rebin(self.Time, self.BCI_Time)
+        self.newSCALE = self.SCALE.rebin(self.Time, self.BCI_Time)
+        self.newSC_FIBER_DX = self.SC_FIBER_DX.rebin(self.Time, self.BCI_Time)
+        self.newSC_FIBER_DY = self.SC_FIBER_DY.rebin(self.Time, self.BCI_Time)
+        self.newPupilX = self.Pupil_X.rebin(self.Time, self.BCI_Time)
+        self.newPupilY = self.Pupil_Y.rebin(self.Time, self.BCI_Time)
+        self.newPupilZ = self.Pupil_Z.rebin(self.Time, self.BCI_Time)
+        self.newPupilR = self.Pupil_R.rebin(self.Time, self.BCI_Time)
+        self.newPupilU = self.Pupil_U.rebin(self.Time, self.BCI_Time)
+        self.newPupilV = self.Pupil_V.rebin(self.Time, self.BCI_Time)
+        self.newPupilW = self.Pupil_W.rebin(self.Time, self.BCI_Time)
+        self.newOPDPupil = self.OPD_Pupil.rebin(self.Time, self.BCI_Time)
+
+
+    def calcMedian(self):
+        medianTOTALFLUX_SC = self.TOTALFLUX_SC.getMedian()
+        medianTOTALFLUX_FT = self.TOTALFLUX_FT.getMedian()
+        medianSCALE = self.SCALE.getMedian()
+        medianSC_FIBER_DX = self.SC_FIBER_DX.getMedian()
+        medianSC_FIBER_DY = self.SC_FIBER_DY.getMedian()
+        medianStrehl = self.Strehl.getMedian()
+
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
         self.sizeInPix = sizeInPix
@@ -325,20 +465,31 @@ class WFS_Frame( object ):
         fig.show()
 
 class GRAVITY_Dual_Sci_P2VM( object ):
-    def __init__(self, fileBase = '', startTime=0.0):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None):
         self.filename = fileBase+'_dualscip2vmred.fits'
         self.startTime = startTime
-        try:
-            self.header = pyfits.getheader(self.filename, ext=10)
-            self.data = pyfits.getdata(self.filename, ext=10)
-            self.opdc = pyfits.getdata(self.filename, 'OPDC')
-            self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
-            self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
-            self.time = self.opdc.field('TIME')/1e6
-            #self.getPupilMotion()
-        except:
-            print "Help!"
-            pass
+        self.header = pyfits.getheader(self.filename, ext=10)
+        self.data = pyfits.getdata(self.filename, ext=10)
+        self.opdc = pyfits.getdata(self.filename, 'OPDC')
+        self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
+        self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
+        self.time = self.opdc.field('TIME')/1e6
+        header = pyfits.getheader(self.filename)
+        self.SObjMag = header.get('ESO INS SOBJ MAG')
+        self.SObjName = header.get('ESO INS SOBJ NAME')
+        self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
+        self.FTName = header.get('ESO FT ROBJ NAME')
+        self.FTMag = header.get('ESO FT ROBJ MAG')
+        self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        self.AcqCamDat = AcqCamData(fiberData=pyfits.getdata(self.filename, ext=16),
+                fluxData=self.data,
+                FTMag=self.FTMag, 
+                SCMag=self.SObjMag,
+                AcqDit=self.AcqCamDIT,
+                CIAO_Data=CIAO_Data)
+        self.AcqCamDat.binData()
+        self.AcqCamDat.calcMedian()
+        #self.getPupilMotion()
 
     def getPupilMotion(self):
         self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
@@ -447,7 +598,8 @@ class GRAVITY_AstroReduced( object ):
         HDUList.close()
 
 class GRAVITY_Data( object ):
-    def __init__(self, fileBase='', UTS=[1,2,3,4], sqlCursor=None):
+    def __init__(self, fileBase='', UTS=[1,2,3,4], sqlCursor=None, CIAO_Data =
+            None):
         self.datadir = os.environ.get('GRAVITY_DATA')
         if self.datadir in fileBase:
             self.fileBase = str(fileBase[len(self.datadir):])
@@ -459,7 +611,12 @@ class GRAVITY_Data( object ):
         self.AstroReduced = GRAVITY_AstroReduced(fileBase=self.datadir+self.fileBase)
         #self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
         self.startTime = aptime.Time(self.AstroReduced.masterheader.get('ESO PCR ACQ START'))
-        self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase, startTime=self.startTime)
+        try:
+            self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase,
+                startTime=self.startTime, CIAO_Data=CIAO_Data)
+            self.AcqCamData = True
+        except:
+            self.AcqCamData = False
         self.DITTimes = {}
         self.SC_Fluxes = {}
         self.FT_Fluxes = {}
@@ -482,6 +639,8 @@ class GRAVITY_Data( object ):
     def addToDatabase(self):
         if self.sqlCursor == None:
             return
+        if self.AcqCamData == False:
+            return
         sqlCommand = "SELECT * FROM GRAVITY_OBS WHERE TIMESTAMP = %.7f" % self.startTime.mjd
         self.sqlCursor.execute(sqlCommand)
         result = self.sqlCursor.fetchall()
@@ -489,11 +648,19 @@ class GRAVITY_Data( object ):
             values = {}
             values["TIMESTAMP"] = self.startTime.mjd
             values["DIRECTORY"] = self.datadir+self.fileBase
+            values["FTOBJ_NAME"] = self.DualSciP2VM.FTName
+            values["FTMAG"] = self.DualSciP2VM.FTMag
+            values["SOBJ_NAME"] = self.DualSciP2VM.SObjName
+            values["SOBJMAG"] = self.DualSciP2VM.SObjMag
 
-            format_str= """INSERT INTO GRAVITY_OBS (TIMESTAMP, DIRECTORY)  
-                 VALUES ('{timestamp}', '{directory}');"""
+            format_str= """INSERT INTO GRAVITY_OBS (TIMESTAMP, DIRECTORY,
+            FTOBJ_NAME, FTMAG, SOBJ_NAME, SOBJMAG)  
+                 VALUES ('{timestamp}', '{directory}', '{ftname}', '{ftmag}',
+                 '{sobjname}', '{sobjmag}');"""
                 
-            sqlCommand = format_str.format(timestamp=values['TIMESTAMP'],directory=values['DIRECTORY'])
+            sqlCommand=format_str.format(timestamp=values['TIMESTAMP'],directory=values['DIRECTORY'],
+                    ftname=values['FTOBJ_NAME'], ftmag=values['FTMAG'],
+                    sobjname=values['SOBJ_NAME'], sobjmag=values['SOBJMAG'])
             
             self.sqlCursor.execute(sqlCommand)
 
@@ -875,9 +1042,11 @@ class DataLogger( object ):
         #self.DM2Z = linalg.pinv(self.Z2DM)
         self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                    'RecnOptimiser.DM2Z.fits', ignore_missing_end=True)
-        self.S2Z = self.DM2Z.dot(self.CM[:60])
-        self.Z2S = linalg.pinv(self.S2Z)
+        #self.S2Z = self.DM2Z.dot(self.CM[:60])
+        #self.Z2S = linalg.pinv(self.S2Z)
         self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
+        self.Zernike2Slopes =  pyfits.getdata(self.cimdatDir+'cimdatZernike2Slopes.fits')
+        self.S2Z = linalg.pinv(self.Zernike2Slopes)
         try:
             self.REFSLP = pyfits.getdata(self.datadir+self.dir+'/Acq.DET1.REFSLP_0001.fits')
         except:
@@ -908,10 +1077,10 @@ class DataLogger( object ):
             return self.startTime != other.startTime
 
     def getRefSlopeZernikes(self):
-        rotatedZernikes = self.S2Z.dot(self.REFSLP.T)
+        #self.rotatedZernikes = self.S2Z.dot(self.REFSLP.T)
+        self.rotatedZernikes = self.REFSLP.dot(self.S2Z)
         
-        print asdf
-        return self.S2Z.dot(self.REFSLP.T)
+        return #self.S2Z.dot(self.REFSLP.T)
 
     def updateTimeStamp(self, oldTimeStamp):
         sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIMESTAMP = %.7f WHERE TIMESTAMP =%.1f" % (self.CIAO_ID, self.startTime, oldTimeStamp)
@@ -1527,8 +1696,6 @@ class DataLogger( object ):
             TTResid = numpy.std(self.TTResiduals, axis=0)*0.5
             sqlCommand = "UPDATE CIAO_%d_DataLoggers SET TIP_RESIDUALS = %.4f, TILT_RESIDUALS = %.4f WHERE TIMESTAMP = %.7f;" % (self.CIAO_ID, TTResid[0], TTResid[1], self.startTime)
             self.sqlCursor.execute(sqlCommand)
-
-    #def getGRAVITY
 
 class CircularBuffer( object ):
     def __init__(self, df='', CDMS_BaseDir = '', CDMS_ConfigDir='', S2M = None, ModalBasis = None, Z2DM = None, S2Z = None, HOIM = None, CM=None, TT2HO=None,

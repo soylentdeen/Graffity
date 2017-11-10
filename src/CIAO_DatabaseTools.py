@@ -26,21 +26,11 @@ class GRAVITY_Database( object ):
             CREATE TABLE %s ( 
             TIMESTAMP FLOAT PRIMARY KEY, 
             DIRECTORY VARCHAR(100),
-            SEEING FLOAT,
-            ASM_SEEING FLOAT, 
-            STREHL FLOAT,
-            TAU0 FLOAT,
-            TERR FLOAT,
-            AVC_STATE BOOLEAN,
-            CM_MODES INTEGER,
-            WFS_GEOM CHARACTER(8),
-            GAIN FLOAT,
-            HOCTR_AWF_ENABLE BOOLEAN,
-            HOCTR_GARBAGE_GAIN FLOAT,
-            HOCTR_KI FLOAT,
-            HOCTR_KT FLOAT,
-            HOCTR_PRA_ENABLE BOOLEAN,
-            HOCTR_PRA_GAIN FLOAT);""" % tableName
+            FTOBJ_NAME VARCHAR(20),
+            FTMAG FLOAT,
+            SOBJ_NAME VARCHAR(20),
+            SOBJMAG FLOAT
+            SOBJ_SWAP BOOLEAN);""" % tableName
         self.cursor.execute(sqlCommand)
 
     def query(self, keywords={}, timeOfDay='BOTH', startTime=None, endTime=None):
