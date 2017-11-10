@@ -214,7 +214,7 @@ class PSF( object ):
                     f = r/fc
                     if f < 1:
                         if r < 0.1:
-                            total[i, j] += 1.0/nLambdaSteps
+                            total[i, j] += 1.0/self.nLambdaSteps
                         else:
                             total[i, j] += (self.TelOTF(f, self.M2/self.M1)*self.Sinc(numpy.pi*x/self.sizeInPix)
                                                        *self.Sinc(numpy.pi*y/self.sizeInPix))/self.nLambdaSteps
