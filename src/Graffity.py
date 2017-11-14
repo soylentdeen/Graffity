@@ -101,7 +101,7 @@ class BCI_Data(object):
 
 class AcqCamData( object ):
     def __init__(self, fiberData=None, fluxData=None, FTMag=0.0, SCMag= 0.0, AcqDit=0.0,
-            CIAO_Data =None):
+            CIAO_Data =None, imagingData=None):
         self.Time = BCI_Data(data=fiberData.field('TIME'))
         self.Strehl = BCI_Data(data=fiberData.field('FIELD_STREHL'))
         self.SC_X = BCI_Data(data=fiberData.field('FIELD_SC_X'), error=fiberData.field('FIELD_SC_XERR'))
@@ -131,6 +131,10 @@ class AcqCamData( object ):
         self.SCMag = SCMag
         self.AcqDit = AcqDit
         self.CIAO_Data = CIAO_Data
+        if imagingData != None:
+            self.xi, self.yi = numpy.meshgrid(numpy.arange(20),
+                    numpy.arange(20))
+            self.calcEllipse(imagingData)
 
     def binData(self):
         self.newStrehl = self.Strehl.rebin(self.Time, self.BCI_Time)
@@ -158,6 +162,50 @@ class AcqCamData( object ):
         medianSC_FIBER_DX = self.SC_FIBER_DX.getMedian()
         medianSC_FIBER_DY = self.SC_FIBER_DY.getMedian()
         medianStrehl = self.Strehl.getMedian()
+
+    def newImg(self, p):
+        return p[0]*numpy.exp(-(self.xi-p[1])**2.0/p[2] -
+                ((self.yi-p[3])**2.0/p[4]))
+
+    def makeEllipse(self, p, img):
+        return (self.newImg(p).flatten() - img.flatten())**2.0
+
+    def fitEllipse(self, img):
+        img /= numpy.max(img)
+        c = 1.0
+        rx = 1.0
+        ry = 1.0
+        xc = 10.0
+        yc = 10.0
+        fit, result = optimize.leastsq(self.makeEllipse, [c, xc, rx, yc, ry], args=(img))
+        ratio = fit[2]/fit[4]
+        return ratio, fit[1], fit[3]
+
+    def calcEllipse(self, imagingData):
+        header = imagingData[0]
+        images = imagingData[1]
+        subImageSize = 250
+        ellipse = []
+        xpos = []
+        ypos = []
+        for j, im in enumerate(images):
+            for i in [1, 2, 3, 4]:
+                startX = header.get('ESO DET1 FRAM%d STRX' %i)
+                startY = header.get('ESO DET1 FRAM%d STRY' %i)
+                xcoord = (self.FT_X.data[i-1][j] - startX) + (i-1)*subImageSize
+                ycoord = self.FT_Y.data[i-1][j] - startY
+                FT_Fit = self.fitEllipse(im[ycoord-10:ycoord+10,
+                    xcoord-10:xcoord+10])
+                ellipse.append(FT_Fit[0])
+                xpos.append(FT_Fit[1]-10 + xcoord)
+                ypos.append(FT_Fit[2]-10 + ycoord)
+
+            del(im)
+
+        self.Ellipse=BCI_Data(data=ellipse)
+        self.Fit_X = BCI_Data(data=xpos)
+        self.Fit_Y = BCI_Data(data=ypos)
+        
 
 class PSF( object ):
     def __init__(self, sizeInPix=20, lam=1.6, dlam=0.3, pscale=17.0, M1=8.0, M2=1.3, nLambdaSteps=9):
@@ -465,11 +513,12 @@ class WFS_Frame( object ):
         fig.show()
 
 class GRAVITY_Dual_Sci_P2VM( object ):
-    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
         self.filename = fileBase+'_dualscip2vmred.fits'
         self.startTime = startTime
         self.header = pyfits.getheader(self.filename, ext=10)
-        self.data = pyfits.getdata(self.filename, ext=10)
+        self.data = pyfits.getdata(self.filename, ext=8)
         self.opdc = pyfits.getdata(self.filename, 'OPDC')
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
@@ -481,15 +530,22 @@ class GRAVITY_Dual_Sci_P2VM( object ):
         self.FTName = header.get('ESO FT ROBJ NAME')
         self.FTMag = header.get('ESO FT ROBJ MAG')
         self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        if processAcqCamData:
+            imagingData = (pyfits.getheader(self.filename),
+                pyfits.getdata(self.filename, ext=17))
+        else:
+            imagingData = None
         self.AcqCamDat = AcqCamData(fiberData=pyfits.getdata(self.filename, ext=16),
                 fluxData=self.data,
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
-                CIAO_Data=CIAO_Data)
+                CIAO_Data=CIAO_Data,
+                imagingData=imagingData)
         self.AcqCamDat.binData()
         self.AcqCamDat.calcMedian()
         #self.getPupilMotion()
+
 
     def getPupilMotion(self):
         self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
@@ -599,7 +655,7 @@ class GRAVITY_AstroReduced( object ):
 
 class GRAVITY_Data( object ):
     def __init__(self, fileBase='', UTS=[1,2,3,4], sqlCursor=None, CIAO_Data =
-            None):
+            None, processAcqCamData=False):
         self.datadir = os.environ.get('GRAVITY_DATA')
         if self.datadir in fileBase:
             self.fileBase = str(fileBase[len(self.datadir):])
@@ -613,9 +669,11 @@ class GRAVITY_Data( object ):
         self.startTime = aptime.Time(self.AstroReduced.masterheader.get('ESO PCR ACQ START'))
         try:
             self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase,
-                startTime=self.startTime, CIAO_Data=CIAO_Data)
+                startTime=self.startTime, CIAO_Data=CIAO_Data,
+                processAcqCamData=processAcqCamData)
             self.AcqCamData = True
         except:
+            raise 
             self.AcqCamData = False
         self.DITTimes = {}
         self.SC_Fluxes = {}
