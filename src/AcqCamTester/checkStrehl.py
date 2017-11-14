@@ -27,6 +27,7 @@ ax3.clear()
 
 datadir = '/home/cdeen/Data/GRAVITY/Strehl/'
 df = glob.glob(datadir+'GRAVI*2017-08-09T02:41:37.564_dualscip2vmred.fits')
+#df = glob.glob(datadir+'GRAVI*2017-08-10T02:21:54.904_dualscip2vmred.fits')
 
 subImageSize = 250
 
@@ -58,7 +59,8 @@ def binStrehl(SR, AT, FT):
     return numpy.array(new)
 
 def newImg(p, x, y):
-    return p[0]*numpy.exp(-(x-p[1])**2.0/p[2] - ((y-p[3])**2.0/p[4]))
+    #return p[0]*numpy.exp(-(x-p[1])**2.0/(numpy.cos(p[5])*p[2]+numpy.sin(p[5])*p[4]) - ((y-p[3])**2.0/(-numpy.sin(p[5])*p[2]+numpy.cos(p[5])*p[4])))
+    return p[0]*numpy.exp(-(x-p[1])**2.0/(p[2]) - ((y-p[3])**2.0/(p[4])))
 
 def calcEllipse(p, img, xi, yi):
     return (newImg(p, xi, yi).flatten() - img.flatten())**2.0
@@ -71,6 +73,7 @@ def fitEllipse(img):
     ry = 1.0
     xc = 20.0
     yc = 20.0
+    theta = 0.0
     x = numpy.arange(img.shape[0])
     y = numpy.arange(img.shape[1])
     xi, yi = numpy.meshgrid(x, y)
@@ -91,7 +94,11 @@ elipse[1] = []
 elipse[2] = []
 elipse[3] = []
 elipse[4] = []
-angle
+AcqFlux = {}
+AcqFlux[1] = []
+AcqFlux[2] = []
+AcqFlux[3] = []
+AcqFlux[4] = []
 
 for f in df:
     AcqCamImages = pyfits.getdata(f, ext=17)
@@ -114,6 +121,7 @@ for f in df:
             startY = AcqCamHeader.get('ESO DET1 FRAM%d STRY' %i)
             xcoord = (ftx[i-1] - startX) + (i-1)*subImageSize
             ycoord = fty[i-1] - startY
+            AcqFlux[i].append(numpy.max(im[ycoord-1:ycoord+1,xcoord-1:xcoord+1]))
             ImageStack[i].append(im[ycoord-20:ycoord+19, xcoord-20:xcoord+19])
             ImageStack[i][-1] /= numpy.max(ImageStack[i][-1])
             elipse[i].append(fitEllipse(ImageStack[i][-1]))
@@ -125,6 +133,7 @@ for f in df:
 
 binnedStrehl = {}
 binnedEllipse = {}
+binnedAcqFlux = {}
 xcross_section = {}
 ycross_section = {}
 largestFlux = 0
@@ -134,9 +143,14 @@ for i in Telescopes:
     #ImageStack[i] = numpy.std(numpy.array(ImageStack[i]), axis=0)
     Strehl[i] = numpy.array(Strehl[i])
     elipse[i] = numpy.array(elipse[i])
+    AcqFlux[i] = numpy.array(AcqFlux[i])
     binnedStrehl[i] = binStrehl(Strehl[i], AcqTime, FluxTime)
     binnedEllipse[i] = binStrehl(elipse[i], AcqTime, FluxTime)
-    ax.scatter(binnedEllipse[i], FTFlux[i-1], c=colors[i-1])
+    binnedAcqFlux[i] = binStrehl(AcqFlux[i], AcqTime, FluxTime)
+    #ax.scatter(binnedEllipse[i], FTFlux[i-1], c=colors[i-1])
+    #ax.scatter(Strehl[i], elipse[i], c=colors[i-1])
+    ax.scatter(binnedAcqFlux[i], FTFlux[i-1], c=colors[i-1])
+    #ax.scatter(binnedStrehl[i], FTFlux[i-1], c=colors[i-1])
     #axes[i-1].matshow(ImageStack[i])
     axes[i-1].clear()
     xcross_section[i] = numpy.sum(ImageStack[i], axis=1)
