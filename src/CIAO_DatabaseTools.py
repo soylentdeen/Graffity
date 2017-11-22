@@ -26,11 +26,24 @@ class GRAVITY_Database( object ):
             CREATE TABLE %s ( 
             TIMESTAMP FLOAT PRIMARY KEY, 
             DIRECTORY VARCHAR(100),
+            AO_SYSTEM VARCHAR(20),
+            AO_GUIDE_MAG FLOAT,
+            AO_GUIDE_WAVELENGTH FLOAT,
             FTOBJ_NAME VARCHAR(20),
             FTMAG FLOAT,
             SOBJ_NAME VARCHAR(20),
-            SOBJMAG FLOAT
-            SOBJ_SWAP BOOLEAN);""" % tableName
+            SOBJMAG FLOAT,
+            SOBJ_SWAP BOOLEAN,
+            KALMAN_GAIN FLOAT,
+            KALMAN_MODE INT,
+            DEROT1 INT,
+            DEROT2 INT,
+            DEROT3 INT,
+            DEROT4 INT,
+            DEROT5 INT,
+            DEROT6 INT,
+            DEROT7 INT,
+            DEROT8 INT);""" % tableName
         self.cursor.execute(sqlCommand)
 
     def query(self, keywords={}, timeOfDay='BOTH', startTime=None, endTime=None):

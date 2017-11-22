@@ -16,18 +16,11 @@ datadir = os.environ.get('GRAVITY_DATA')
 for dp, dn, fn in glob.os.walk(datadir):
     if (len(dn) == 0):
         for f in fn:
-            if 'dualscip2vmred.fits' in f:
-                fileBase = dp[len(datadir):]+'/'+f[:-20]
+            if 'p2vmred.fits' in f:
+                fileBase = dp[len(datadir):]+'/'+f.split('_')[0]
                 print fileBase
-                #try:
                 GL = Graffity.GRAVITY_Data(fileBase=fileBase, sqlCursor=cursor)
-                #GL.computeACQCAMStrehl()
                 GL.addToDatabase()
-                #except:
-                #    print "oops!"
-                #    pass
-
-
 
 connection.commit()
 connection.close()

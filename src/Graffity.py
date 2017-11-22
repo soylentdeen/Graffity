@@ -517,25 +517,168 @@ class GRAVITY_Dual_Sci_P2VM( object ):
             processAcqCamData=False):
         self.filename = fileBase+'_dualscip2vmred.fits'
         self.startTime = startTime
-        self.header = pyfits.getheader(self.filename, ext=10)
-        self.data = pyfits.getdata(self.filename, ext=8)
-        self.opdc = pyfits.getdata(self.filename, 'OPDC')
+        HDU = pyfits.open(self.filename)
+        self.data = HDU["OI_FLUX"].data
+        self.opdc = HDU['OPDC'].data
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
         self.time = self.opdc.field('TIME')/1e6
-        header = pyfits.getheader(self.filename)
+        header = HDU["PRIMARY"].header
         self.SObjMag = header.get('ESO INS SOBJ MAG')
         self.SObjName = header.get('ESO INS SOBJ NAME')
+        self.AOInUse = header.get('ESO COU AO SYSTEM')
+        self.AO_Mag = header.get('ESO COU GUID MAG')
+        self.AO_Wave = header.get('ESO COU GUID WAVELEN')
+        self.Kal_Gain = header.get('ESO FT KAL GAIN')
+        self.Kal_Mode = header.get('ESO FT KAL MODE')
+        self.Derot1 = header.get('ESO INS DROT1 ENC')
+        self.Derot2 = header.get('ESO INS DROT2 ENC')
+        self.Derot3 = header.get('ESO INS DROT3 ENC')
+        self.Derot4 = header.get('ESO INS DROT4 ENC')
+        self.Derot5 = header.get('ESO INS DROT5 ENC')
+        self.Derot6 = header.get('ESO INS DROT6 ENC')
+        self.Derot7 = header.get('ESO INS DROT7 ENC')
+        self.Derot8 = header.get('ESO INS DROT8 ENC')
         self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
         self.FTName = header.get('ESO FT ROBJ NAME')
         self.FTMag = header.get('ESO FT ROBJ MAG')
         self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
         if processAcqCamData:
-            imagingData = (pyfits.getheader(self.filename),
-                pyfits.getdata(self.filename, ext=17))
+            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
         else:
             imagingData = None
-        self.AcqCamDat = AcqCamData(fiberData=pyfits.getdata(self.filename, ext=16),
+        self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
+                fluxData=self.data,
+                FTMag=self.FTMag, 
+                SCMag=self.SObjMag,
+                AcqDit=self.AcqCamDIT,
+                CIAO_Data=CIAO_Data,
+                imagingData=imagingData)
+        self.AcqCamDat.binData()
+        self.AcqCamDat.calcMedian()
+        #self.getPupilMotion()
+
+
+    def getPupilMotion(self):
+        self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
+        self.PUPIL_NSPOT = self.data.field('PUPIL_NSPOT')[::4]
+        self.PUPIL_X = {}
+        self.PUPIL_Y = {}
+        self.PUPIL_Z = {}
+        self.PUPIL_R = {}
+        self.PUPIL_U = {}
+        self.PUPIL_V = {}
+        self.PUPIL_W = {}
+        
+        for UT in [1, 2, 3, 4]:
+            self.PUPIL_X[UT] = self.data.field('PUPIL_X')[UT-1::4]
+            self.PUPIL_Y[UT] = self.data.field('PUPIL_Y')[UT-1::4]
+            self.PUPIL_Z[UT] = self.data.field('PUPIL_Z')[UT-1::4]
+            self.PUPIL_R[UT] = self.data.field('PUPIL_R')[UT-1::4]
+            self.PUPIL_U[UT] = self.data.field('PUPIL_U')[UT-1::4]
+            self.PUPIL_V[UT] = self.data.field('PUPIL_V')[UT-1::4]
+            self.PUPIL_W[UT] = self.data.field('PUPIL_W')[UT-1::4]
+
+    def computeOPDPeriodograms(self):
+        M_matrix = numpy.array([-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,-1.,0.0,0.0,1.,0.0,-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,0.0,-1.,1.]);
+        M_matrix = M_matrix.reshape((6, 4))
+
+        opdc_kalman_pizeo_opd = numpy.dot(M_matrix,
+                self.opdc_kalman_piezo.T).T
+        PSD_k = [1, 2, 3, 4, 5, 6]
+        for baseline in range(0, 6):
+            f_k, PSD_k[baseline] = signal.welch(opdc_kalman_pizeo_opd[:,baseline],
+                    fs=(1./numpy.nanmean(numpy.diff(self.time))), detrend='linear',
+                    nperseg=1024, scaling='spectrum')
+
+            PSD_k[baseline] = numpy.sqrt(PSD_k[baseline])*1000.0
+        self.PSD_k = PSD_k
+        self.f_k = f_k
+
+    def findVibrationPeaks(self, ax=None):
+        self.flattenPSDs()
+        self.peaks = {}
+        for baseline in range(0,6):
+            self.peaks[baseline] = {}
+            peaks = scipy.signal.find_peaks_cwt(self.flattenedPSD_k[baseline],
+                    numpy.arange(5,10))
+            diffs = self.f_k[numpy.diff(peaks)]
+            self.peaks[baseline]['freqs'] = []
+            self.peaks[baseline]['power'] = []
+            for i in range(len(diffs)):
+                if diffs[i] > 3:
+                    window = range(numpy.max([0, peaks[i]-3]), numpy.min([len(self.f_k), peaks[i]+3]))
+                    self.peaks[baseline]['freqs'].append(self.f_k[peaks[i]])
+                    self.peaks[baseline]['power'].append(scipy.integrate.trapz(self.PSD_k[baseline][window],
+                                                 x=self.f_k[window]))
+
+            self.peaks[baseline]['freqs'] = numpy.array(self.peaks[baseline]['freqs'])
+            self.peaks[baseline]['power'] = numpy.array(self.peaks[baseline]['power'])
+            
+            if ax != None:
+                #ax.clear()
+                ax.set_xscale('linear')
+                ax.set_yscale('linear')
+                ax.plot(self.f_k, self.PSD_k[baseline])
+                ax.figure.show()
+                raw_input()
+
+        return self.peaks
+
+
+
+    def flattenPSDs(self):
+        window = self.f_k > 15.0
+        self.flattenedPSD_k = []
+        for baseline in range(0,6):
+            A = numpy.log10(self.PSD_k[baseline][window])
+            model = numpy.array([numpy.ones(self.f_k[window].shape), numpy.log10(self.f_k[window])])
+            im = numpy.linalg.pinv(model)
+            SpectralSlope = im.T.dot(A.T)
+
+            fullModel = numpy.array([numpy.ones(self.f_k.shape), numpy.log10(self.f_k)])
+            self.flattenedPSD_k.append(self.PSD_k[baseline]/10.0**SpectralSlope.dot(fullModel))
+
+class GRAVITY_Single_Sci_P2VM( object ):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
+        self.filename = fileBase+'_singlescip2vmred.fits'
+        self.startTime = startTime
+        HDU = pyfits.open(self.filename)
+        self.data = HDU["OI_FLUX"].data
+        self.opdc = HDU['OPDC'].data
+        self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
+        self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
+        self.time = self.opdc.field('TIME')/1e6
+        header = HDU["PRIMARY"].header
+        self.SObjMag = header.get('ESO INS SOBJ MAG')
+        self.SObjName = header.get('ESO INS SOBJ NAME')
+        self.AOInUse = header.get('ESO COU AO SYSTEM')
+        self.AO_Mag = header.get('ESO COU GUID MAG')
+        self.AO_Wave = header.get('ESO COU GUID WAVELEN')
+        self.Kal_Gain = header.get('ESO FT KAL GAIN')
+        self.Kal_Mode = header.get('ESO FT KAL MODE')
+        self.Derot1 = header.get('ESO INS DROT1 ENC')
+        self.Derot2 = header.get('ESO INS DROT2 ENC')
+        self.Derot3 = header.get('ESO INS DROT3 ENC')
+        self.Derot4 = header.get('ESO INS DROT4 ENC')
+        self.Derot5 = header.get('ESO INS DROT5 ENC')
+        self.Derot6 = header.get('ESO INS DROT6 ENC')
+        self.Derot7 = header.get('ESO INS DROT7 ENC')
+        self.Derot8 = header.get('ESO INS DROT8 ENC')
+        swap = header.get('ESO INS SOBJ SWAP')
+        if swap != None:
+            self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
+        else:
+            self.SObjSwap = False
+        self.FTName = header.get('ESO FT ROBJ NAME')
+        self.FTMag = header.get('ESO FT ROBJ MAG')
+        self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        if processAcqCamData:
+            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+        else:
+            imagingData = None
+        self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
                 fluxData=self.data,
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
@@ -667,14 +810,19 @@ class GRAVITY_Data( object ):
         self.AstroReduced = GRAVITY_AstroReduced(fileBase=self.datadir+self.fileBase)
         #self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
         self.startTime = aptime.Time(self.AstroReduced.masterheader.get('ESO PCR ACQ START'))
-        try:
+        self.AcqCamData = None
+        self.DualSciP2VM = None
+        self.SingleSciP2VM = None
+        if os.path.exists(self.datadir+self.fileBase+'_singlescip2vmred.fits'):
+            self.SingleSciP2VM = GRAVITY_Single_Sci_P2VM(fileBase=self.datadir+self.fileBase,
+                startTime=self.startTime, CIAO_Data=CIAO_Data,
+                processAcqCamData=processAcqCamData)
+            self.AcqCamData = self.SingleSciP2VM.AcqCamDat
+        elif os.path.exists(self.datadir+self.fileBase+'_dualscip2vmred.fits'):
             self.DualSciP2VM = GRAVITY_Dual_Sci_P2VM(fileBase=self.datadir+self.fileBase,
                 startTime=self.startTime, CIAO_Data=CIAO_Data,
                 processAcqCamData=processAcqCamData)
-            self.AcqCamData = True
-        except:
-            raise 
-            self.AcqCamData = False
+            self.AcqCamData = self.DualSciP2VM.AcqCamDat
         self.DITTimes = {}
         self.SC_Fluxes = {}
         self.FT_Fluxes = {}
@@ -689,6 +837,42 @@ class GRAVITY_Data( object ):
                 self.DITTimes[UT].append((d.field('TIME')[UT-1::4]*1e-6)/(24*3600.0)+self.startTime.mjd)
                 self.SC_Fluxes[UT].append(d.field('TOTALFLUX_SC')[UT-1::4])
                 self.FT_Fluxes[UT].append(d.field('TOTALFLUX_FT')[UT-1::4])
+
+    def computeOPDPeriodograms(self):
+        if self.SingleSciP2VM != None:
+            self.SingleSciP2VM.computeOPDPeriodograms()
+        if self.DualSciP2VM != None:
+            self.DualSciP2VM.computeOPDPeriodograms()
+
+    def findVibrationPeaks(self):
+        if self.SingleSciP2VM != None:
+            return self.SingleSciP2VM.findVibrationPeaks()
+        if self.DualSciP2VM != None:
+            return self.DualSciP2VM.findVibrationPeaks()
+
+    def getDerotatorPositions(self):
+        derot = []
+        if self.SingleSciP2VM != None:
+            derot.append(self.SingleSciP2VM.Derot1)
+            derot.append(self.SingleSciP2VM.Derot2)
+            derot.append(self.SingleSciP2VM.Derot3)
+            derot.append(self.SingleSciP2VM.Derot4)
+            derot.append(self.SingleSciP2VM.Derot5)
+            derot.append(self.SingleSciP2VM.Derot6)
+            derot.append(self.SingleSciP2VM.Derot7)
+            derot.append(self.SingleSciP2VM.Derot8)
+        if self.DualSciP2VM != None:
+            derot.append(self.DualSciP2VM.Derot1)
+            derot.append(self.DualSciP2VM.Derot2)
+            derot.append(self.DualSciP2VM.Derot3)
+            derot.append(self.DualSciP2VM.Derot4)
+            derot.append(self.DualSciP2VM.Derot5)
+            derot.append(self.DualSciP2VM.Derot6)
+            derot.append(self.DualSciP2VM.Derot7)
+            derot.append(self.DualSciP2VM.Derot8)
+
+        return numpy.array(derot)
+
 
     def computeACQCAMStrehl(self):
         print asdf
@@ -706,19 +890,66 @@ class GRAVITY_Data( object ):
             values = {}
             values["TIMESTAMP"] = self.startTime.mjd
             values["DIRECTORY"] = self.datadir+self.fileBase
-            values["FTOBJ_NAME"] = self.DualSciP2VM.FTName
-            values["FTMAG"] = self.DualSciP2VM.FTMag
-            values["SOBJ_NAME"] = self.DualSciP2VM.SObjName
-            values["SOBJMAG"] = self.DualSciP2VM.SObjMag
+            
+            if self.DualSciP2VM != None:
+                values["FTOBJ_NAME"] = self.DualSciP2VM.FTName
+                values["FTMAG"] = self.DualSciP2VM.FTMag
+                values["SOBJ_NAME"] = self.DualSciP2VM.SObjName
+                values["SOBJMAG"] = self.DualSciP2VM.SObjMag
+                values["AO_SYS"] = self.DualSciP2VM.AOInUse
+                values["AO_MAG"] = self.DualSciP2VM.AO_Mag
+                values["AO_WAVE"] = self.DualSciP2VM.AO_Wave
+                values["KAL_GAIN"] = self.DualSciP2VM.Kal_Gain
+                values["KAL_MODE"] = self.DualSciP2VM.Kal_Mode
+                values["DEROT1"] = self.DualSciP2VM.Derot1
+                values["DEROT2"] = self.DualSciP2VM.Derot2
+                values["DEROT3"] = self.DualSciP2VM.Derot3
+                values["DEROT4"] = self.DualSciP2VM.Derot4
+                values["DEROT5"] = self.DualSciP2VM.Derot5
+                values["DEROT6"] = self.DualSciP2VM.Derot6
+                values["DEROT7"] = self.DualSciP2VM.Derot7
+                values["DEROT8"] = self.DualSciP2VM.Derot8
+            elif self.SingleSciP2VM != None:
+                values["FTOBJ_NAME"] = self.SingleSciP2VM.FTName
+                values["FTMAG"] = self.SingleSciP2VM.FTMag
+                values["SOBJ_NAME"] = self.SingleSciP2VM.SObjName
+                values["SOBJMAG"] = self.SingleSciP2VM.SObjMag
+                values["AO_SYS"] = self.SingleSciP2VM.AOInUse
+                values["AO_MAG"] = self.SingleSciP2VM.AO_Mag
+                values["AO_WAVE"] = self.SingleSciP2VM.AO_Wave
+                values["KAL_GAIN"] = self.SingleSciP2VM.Kal_Gain
+                values["KAL_MODE"] = self.SingleSciP2VM.Kal_Mode
+                values["DEROT1"] = self.SingleSciP2VM.Derot1
+                values["DEROT2"] = self.SingleSciP2VM.Derot2
+                values["DEROT3"] = self.SingleSciP2VM.Derot3
+                values["DEROT4"] = self.SingleSciP2VM.Derot4
+                values["DEROT5"] = self.SingleSciP2VM.Derot5
+                values["DEROT6"] = self.SingleSciP2VM.Derot6
+                values["DEROT7"] = self.SingleSciP2VM.Derot7
+                values["DEROT8"] = self.SingleSciP2VM.Derot8
+            else:
+                print "Oops! Didn't work!"
+                return
+
 
             format_str= """INSERT INTO GRAVITY_OBS (TIMESTAMP, DIRECTORY,
-            FTOBJ_NAME, FTMAG, SOBJ_NAME, SOBJMAG)  
-                 VALUES ('{timestamp}', '{directory}', '{ftname}', '{ftmag}',
-                 '{sobjname}', '{sobjmag}');"""
+            AO_SYSTEM, AO_GUIDE_MAG, AO_GUIDE_WAVELENGTH, FTOBJ_NAME, FTMAG,
+            SOBJ_NAME, SOBJMAG, KALMAN_GAIN, KALMAN_MODE, DEROT1, DEROT2,
+            DEROT3, DEROT4, DEROT5, DEROT6, DEROT7, DEROT8)  
+                 VALUES ('{timestamp}', '{directory}', '{ao_sys}', '{ao_mag}',
+                 '{ao_wave}', '{ftname}', '{ftmag}', '{sobjname}', '{sobjmag}',
+                 '{kal_gain}', '{kal_mode}', '{derot1}', '{derot2}', '{derot3}',
+                 '{derot4}', '{derot5}', '{derot6}', '{derot7}', '{derot8}');"""
                 
             sqlCommand=format_str.format(timestamp=values['TIMESTAMP'],directory=values['DIRECTORY'],
-                    ftname=values['FTOBJ_NAME'], ftmag=values['FTMAG'],
-                    sobjname=values['SOBJ_NAME'], sobjmag=values['SOBJMAG'])
+                    ao_sys=values["AO_SYS"], ao_mag=values['AO_MAG'],
+                    ao_wave=values['AO_WAVE'], ftname=values['FTOBJ_NAME'], ftmag=values['FTMAG'],
+                    sobjname=values['SOBJ_NAME'], sobjmag=values['SOBJMAG'],
+                    kal_gain=values['KAL_GAIN'], kal_mode=values['KAL_MODE'],
+                    derot1=values["DEROT1"], derot2=values["DEROT2"],
+                    derot3=values["DEROT3"], derot4=values["DEROT4"],
+                    derot5=values["DEROT5"], derot6=values["DEROT6"],
+                    derot7=values["DEROT7"], derot8=values["DEROT8"])
             
             self.sqlCursor.execute(sqlCommand)
 

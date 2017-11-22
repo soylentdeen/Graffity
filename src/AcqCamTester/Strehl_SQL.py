@@ -19,7 +19,7 @@ def findCorrelations(GravObs=[], ax=None):
     #    ax[0].clear()
     #    ax[1].clear()
     #    ax[2].clear()
-    linex = numpy.array([numpy.ones(50), numpy.linspace(0, 0.3)])
+    linex = numpy.array([numpy.ones(50), numpy.linspace(0, 0.1)])
     difference = {}
     strehl = {}
     cov = {}
@@ -44,13 +44,15 @@ def findCorrelations(GravObs=[], ax=None):
             DimTripwire = True
             BrightTripwire = True
             #if hasattr(Grav.DualSciP2VM, "AcqCamDat"):
-            if Grav.AcqCamData:
-                Acq = Grav.DualSciP2VM.AcqCamDat
+            derot = Grav.getDerotatorPositions()
+            if Grav.AcqCamData != None:
+                Acq = Grav.AcqCamData
                 strehlAccumulator = []
-                CIAO_SR[i].append(Acq.CIAO_Data[j]["Strehl"])
+                if Acq.CIAO_Data != None:
+                    CIAO_SR[i].append(Acq.CIAO_Data[j]["Strehl"])
                 fluxAccumulator = []
-                Grav.DualSciP2VM.computeOPDPeriodograms()
-                peaks = Grav.DualSciP2VM.findVibrationPeaks()
+                Grav.computeOPDPeriodograms()
+                peaks = Grav.findVibrationPeaks()
                 for SR, FT_flux, SC_flux, dx, dy, sc, pupil in zip(Acq.newStrehl.data[i],
                         Acq.TOTALFLUX_FT.data[i], Acq.TOTALFLUX_SC.data[i], Acq.newSC_FIBER_DX.data[i],
                         Acq.newSC_FIBER_DY.data[i], Acq.newSCALE.data[i],
@@ -104,10 +106,11 @@ def findCorrelations(GravObs=[], ax=None):
                     #        [Grav.startTime.mjd - 57970.0], c=colors[i])
                     #ax[2][i].scatter([Grav.startTime.mjd - 57970.0],
                     #        [numpy.median(fluxAccumulator)], c=colors[i])
-                    ax[3].scatter([Acq.CIAO_Data[j]["Strehl"]],
-                            [numpy.mean(numpy.array(strehlAccumulator))],
+                    ratio = numpy.median(numpy.array(fluxAccumulator)/numpy.array(strehlAccumulator))
+                    #ax[3].scatter([derot[i]-derot[i+4]], [ratio],
+                    ax[3].scatter([derot[i]],
+                            [numpy.median(numpy.array(fluxAccumulator))],
                             c=colors[i])
-                """
                 affected = []
                 for bl in baselines.keys():
                     if j+1 in baselines[bl]:
@@ -128,8 +131,6 @@ def findCorrelations(GravObs=[], ax=None):
                 for comm in CommonFreqs:
                     for bl in affected:
                         ax[4].scatter([peaks[bl]['power'][peaks[bl]['freqs']==comm]],[numpy.mean(strehlAccumulator)],color=colors[i])
-
-                #"""
 
 
 
@@ -178,17 +179,15 @@ def findCorrelations(GravObs=[], ax=None):
         for n in range(4):
             ax[0][n].plot(linex[1,:], fit_FT.dot(linex), color = colors[i])
             ax[1][n].plot(linex[1,:], fit_SC.dot(linex), color = colors[i])
-        #ax[2][i].hist(x_FT, bins=numpy.linspace(0,1.0, num=20),
+        #ax[2][i].hist(CIAO_SR[i], bins=numpy.linspace(0,1.0, num=10),
         #            color=colors[i])
-        ax[2][i].hist(x_FT,
-                    color=colors[i])
         #ax[4].scatter(ellipsicity[i], x_FT, color=colors[i])
-        #ax[2][i].hist(numpy.array(strehl[i], dtype=float),
-        #        bins=numpy.linspace(0,0.35),
-        #            color=colors[i])
-        print("CIAO Strehl")
-        print("Mean = %.3f Stdev = %.3f Skew = %.3f" % (numpy.mean(CIAO_SR[i]),
-            numpy.std(CIAO_SR[i]), scipy.stats.skew(CIAO_SR[i])))
+        ax[2][i].hist(numpy.array(strehl[i], dtype=float),
+                bins=numpy.linspace(0,0.35),
+                    color=colors[i])
+        #print("CIAO Strehl")
+        #print("Mean = %.3f Stdev = %.3f Skew = %.3f" % (numpy.mean(CIAO_SR[i]),
+        #    numpy.std(CIAO_SR[i]), scipy.stats.skew(CIAO_SR[i])))
         print("AcqCam Strehl")
         print("Mean = %.3f Stdev = %.3f Skew = %.3f" % (numpy.mean(strehl[i]),
             numpy.std(strehl[i]), scipy.stats.skew(strehl[i])))
@@ -198,12 +197,12 @@ def findCorrelations(GravObs=[], ax=None):
         #cov[i] = 1.0/n * (A - avg).T.dot(A-avg)
 
     for i in range(4):
-        print("KS Test for CIAO and AcqCam SR for Tel%d: %.3f" % (i+1,
-            scipy.stats.ks_2samp(CIAO_SR[i], strehl[i]).pvalue))
+        #print("KS Test for CIAO and AcqCam SR for Tel%d: %.3f" % (i+1,
+        #    scipy.stats.ks_2samp(CIAO_SR[i], strehl[i]).pvalue))
         for j in range(i):
             if i != j:
-                print("KS Test for CIAO SR for Tel%d and Tel%d: %.3f" % (i+1, j+1,
-                    scipy.stats.ks_2samp(CIAO_SR[i], CIAO_SR[j]).pvalue))
+                #print("KS Test for CIAO SR for Tel%d and Tel%d: %.3f" % (i+1, j+1,
+                #    scipy.stats.ks_2samp(CIAO_SR[i], CIAO_SR[j]).pvalue))
                 print("KS Test for AcqCam SR for Tel%d and Tel%d: %.3f" % (i+1, j+1,
                     scipy.stats.ks_2samp(strehl[i], strehl[j]).pvalue))
 
@@ -291,17 +290,22 @@ GDB = CIAO_DatabaseTools.GRAVITY_Database()
 CDB = CIAO_DatabaseTools.CIAO_Database()
 CIAO_DataLoggers = CDB.query(keywords = ["TAU0", "STREHL", "SEEING", "WINDSP"])
 
-startTime = '2017-08-01 00:00:00'
+startTime = '2017-01-01 00:00:00'
 stopTime = '2018-09-01 00:00:00'
 
-GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG', 'SOBJMAG'], timeOfDay='NIGHT', startTime=startTime,
+GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG',
+        'SOBJMAG', 'AO_SYSTEM', 'DEROT1', 'DEROT2', 'DEROT3', 'DEROT4',
+        'DEROT5', 'DEROT6', 'DEROT7', 'DEROT8'], timeOfDay='NIGHT', startTime=startTime,
         endTime=stopTime)
 
 GravData = []
 for Grav in GravityVals:
     CIAO_Data = getCIAO_DataLogger(Grav, CIAO_DataLoggers)
     #if ((CIAO_Data != None)):
-    if ((CIAO_Data != None) and (Grav[1] == 'S2') and (Grav[0] == 'IRS16C')):
+    #if ((CIAO_Data != None) and (Grav[1] == 'S2') and (Grav[0] == 'IRS16C')):
+    #if ((Grav[4] == 'MACAO') and (CIAO_Data==None) and (Grav[0] == 'SS433')):
+    #if ((Grav[0] == '3C_273')):
+    if ((Grav[4] == 'CIAO') and (Grav[1]=='S2') and (Grav[0] == 'IRS16C')):
         GravData.append(Graffity.GRAVITY_Data(fileBase=Grav[-1],
             CIAO_Data=CIAO_Data, processAcqCamData=False))
         print Grav[-1]
@@ -314,7 +318,7 @@ covar = findCorrelations(GravData, ax=[[ax11, ax12, ax13, ax14], [ax21, ax22,
 #Acq.plot(axes=axes)
 #Acq.findCorrelations(ax1)
 
-ax11.set_xbound(0.0, 0.3)
+ax11.set_xbound(0.0, 0.15)
 ax11.set_ybound(ax11.dataLim.get_points()[0][1], ax11.dataLim.get_points()[1][1])
 ax11.set_xlabel("Strehl Ratio")
 ax11.set_ylabel("Fringe Tracking Flux")
@@ -322,7 +326,7 @@ pyplot.setp(ax12.get_xticklabels(), visible=False)
 pyplot.setp(ax14.get_xticklabels(), visible=False)
 pyplot.setp(ax13.get_yticklabels(), visible=False)
 pyplot.setp(ax14.get_yticklabels(), visible=False)
-ax21.set_xbound(0.0, 0.3)
+ax21.set_xbound(0.0, 0.15)
 ax21.set_ybound(ax21.dataLim.get_points()[0][1], ax21.dataLim.get_points()[1][1])
 ax21.set_xlabel("Strehl Ratio")
 ax21.set_ylabel("Science Object Flux")
@@ -349,8 +353,8 @@ fig2.show()
 fig3.show()
 fig4.show()
 fig5.show()
-#fig1.savefig("FT_Flux.png")
-#fig2.savefig("SC_Flux.png")
+fig1.savefig("FT_Flux.png")
+fig2.savefig("SC_Flux.png")
 fig3.suptitle("CIAO Strehl Ratios")
 #fig3.savefig("Time.png")
 #fig3.suptitle("Fiber Positioning Error")
