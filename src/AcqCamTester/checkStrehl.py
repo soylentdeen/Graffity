@@ -26,8 +26,8 @@ ax3 = fig3.add_axes([0.1, 0.1, 0.8, 0.8])
 ax3.clear()
 
 datadir = '/home/cdeen/Data/GRAVITY/Strehl/'
-df = glob.glob(datadir+'GRAVI*2017-08-09T02:41:37.564_dualscip2vmred.fits')
-#df = glob.glob(datadir+'GRAVI*2017-08-10T02:21:54.904_dualscip2vmred.fits')
+#df = glob.glob(datadir+'GRAVI*2017-08-09T02:41:37.564_dualscip2vmred.fits')
+df = glob.glob(datadir+'GRAVI*2017-08-10T02:21:54.904_dualscip2vmred.fits')
 
 subImageSize = 250
 
@@ -172,7 +172,7 @@ for i in Telescopes:
 
 ax3.plot(numpy.sum(Perfect.PSF, axis=1), c='k')
 
-ax.set_xlabel("H-band Strehl")
+ax.set_xlabel("Peak Flux - AcqCam")
 ax.set_ylabel("FT Flux")
 fig.show()
 fig.savefig("Confirmation.png")

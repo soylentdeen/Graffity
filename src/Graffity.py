@@ -280,6 +280,8 @@ class PSF( object ):
 
     def calcStrehl(self, cutout):
         factor = numpy.sum(self.PSF) / numpy.sum(cutout)
+        if numpy.max(cutout)*factor > 1.3:
+            raise
         return numpy.max(cutout)*factor
         
 
