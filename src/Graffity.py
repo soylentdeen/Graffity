@@ -541,6 +541,8 @@ class GRAVITY_Dual_Sci_P2VM( object ):
         self.Derot6 = header.get('ESO INS DROT6 ENC')
         self.Derot7 = header.get('ESO INS DROT7 ENC')
         self.Derot8 = header.get('ESO INS DROT8 ENC')
+        self.SOBJ_OFFX = header.get('ESO INS SOBJ OFFX')
+        self.SOBJ_OFFY = header.get('ESO INS SOBJ OFFY')
         self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
         self.FTName = header.get('ESO FT ROBJ NAME')
         self.FTMag = header.get('ESO FT ROBJ MAG')
@@ -668,7 +670,10 @@ class GRAVITY_Single_Sci_P2VM( object ):
         self.Derot6 = header.get('ESO INS DROT6 ENC')
         self.Derot7 = header.get('ESO INS DROT7 ENC')
         self.Derot8 = header.get('ESO INS DROT8 ENC')
+        self.SOBJ_OFFX = header.get('ESO INS SOBJ OFFX')
+        self.SOBJ_OFFY = header.get('ESO INS SOBJ OFFY')
         swap = header.get('ESO INS SOBJ SWAP')
+        print asdf
         if swap != None:
             self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
         else:
@@ -874,6 +879,13 @@ class GRAVITY_Data( object ):
             derot.append(self.DualSciP2VM.Derot8)
 
         return numpy.array(derot)
+
+
+    def getSobj_Offsets(self):
+        if self.SingleSciP2VM != None:
+            return (self.SingleSciP2VM.SOBJ_OFFX, self.SingleSciP2VM.SOBJ_OFFY)
+        if self.DualSciP2VM != None:
+            return (self.DualSciP2VM.SOBJ_OFFX, self.DualSciP2VM.SOBJ_OFFY)
 
 
     def computeACQCAMStrehl(self):
