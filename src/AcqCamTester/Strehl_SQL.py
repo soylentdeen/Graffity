@@ -186,7 +186,7 @@ def findCorrelations(GravObs=[], ax=None):
         #            color=colors[i])
         #ax[4].scatter(ellipsicity[i], x_FT, color=colors[i])
         ax[2][i].hist(numpy.array(strehl[i], dtype=float),
-                bins=numpy.linspace(0,0.10, 20),
+                bins=numpy.linspace(0,0.30, 20),
                     color=colors[i])
         #print("CIAO Strehl")
         #print("Mean = %.3f Stdev = %.3f Skew = %.3f" % (numpy.mean(CIAO_SR[i]),
@@ -302,8 +302,8 @@ GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG',
         endTime=stopTime)
 
 GravData = []
-ftobj = "WDS_J16003-2237AB"
-sobj = "WDS_J16003-2237AB"
+ftobj = "WDS_J15348+1032A"
+sobj = "WDS_J15348+1032B"
 
 for Grav in GravityVals:
     CIAO_Data = getCIAO_DataLogger(Grav, CIAO_DataLoggers)
@@ -325,8 +325,8 @@ covar = findCorrelations(GravData, ax=[[ax11, ax12, ax13, ax14], [ax21, ax22,
 #Acq.plot(axes=axes)
 #Acq.findCorrelations(ax1)
 
-ax11.set_xbound(0.0, 0.1)
-ax11.set_ybound(0.0, 3e6)
+ax11.set_xbound(0.0, 0.3)
+ax11.set_ybound(0.0, 2e6)
 #ax11.set_xbound(0.0, 2.0)
 #ax11.set_ybound(ax11.dataLim.get_points()[0][1], ax11.dataLim.get_points()[1][1])
 ax11.set_xlabel("Strehl Ratio")
@@ -335,8 +335,8 @@ pyplot.setp(ax12.get_xticklabels(), visible=False)
 pyplot.setp(ax14.get_xticklabels(), visible=False)
 pyplot.setp(ax13.get_yticklabels(), visible=False)
 pyplot.setp(ax14.get_yticklabels(), visible=False)
-ax21.set_xbound(0.0, 0.1)
-ax21.set_ybound(0.0, 3e6)
+ax21.set_xbound(0.0, 0.3)
+ax21.set_ybound(0.0, 1e6)
 #ax21.set_xbound(0.0, 2.0)
 #ax21.set_ybound(ax21.dataLim.get_points()[0][1], ax21.dataLim.get_points()[1][1])
 ax21.set_xlabel("Strehl Ratio")

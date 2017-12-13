@@ -30,6 +30,9 @@ class BCI_Data(object):
                     if self.error == None:
                         self.error = {}
                     self.error[i] = error[i::4]
+        else:
+            for i in range(4):
+                self.data[i] = numpy.array([])
 
     def __pow__(self, power):
         for i in self.data.keys():
@@ -43,6 +46,19 @@ class BCI_Data(object):
             if self.error != None:
                 self.error[i] = numpy.sqrt(self.error[i]**2.0 +other.error[i]**2.0)
             self.data[i] = self.data[i] + other.data[i]
+        return self
+
+    def append(self, other):
+        for i in self.data.keys():
+            self.data[i] = numpy.append(self.data[i], other.data[i])
+            if self.error != None:
+                self.error[i] = numpy.append(self.error[i], other.error[i])
+        return self
+
+    def median(self):
+        for i in self.data.keys():
+            self.data[i] = numpy.median(self.data[i])
+
         return self
 
     def getMedian(self):
@@ -512,7 +528,96 @@ class WFS_Frame( object ):
         print self.gradients[5][1]
         fig.show()
 
-class GRAVITY_Dual_Sci_P2VM( object ):
+class GRAVITY_Dual_P2VM( object ):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
+        return self
+
+    def getPupilMotion(self):
+        self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
+        self.PUPIL_NSPOT = self.data.field('PUPIL_NSPOT')[::4]
+        self.PUPIL_X = {}
+        self.PUPIL_Y = {}
+        self.PUPIL_Z = {}
+        self.PUPIL_R = {}
+        self.PUPIL_U = {}
+        self.PUPIL_V = {}
+        self.PUPIL_W = {}
+        
+        for UT in [1, 2, 3, 4]:
+            self.PUPIL_X[UT] = self.data.field('PUPIL_X')[UT-1::4]
+            self.PUPIL_Y[UT] = self.data.field('PUPIL_Y')[UT-1::4]
+            self.PUPIL_Z[UT] = self.data.field('PUPIL_Z')[UT-1::4]
+            self.PUPIL_R[UT] = self.data.field('PUPIL_R')[UT-1::4]
+            self.PUPIL_U[UT] = self.data.field('PUPIL_U')[UT-1::4]
+            self.PUPIL_V[UT] = self.data.field('PUPIL_V')[UT-1::4]
+            self.PUPIL_W[UT] = self.data.field('PUPIL_W')[UT-1::4]
+
+    def computeOPDPeriodograms(self):
+        M_matrix = numpy.array([-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,-1.,0.0,0.0,1.,0.0,-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,0.0,-1.,1.]);
+        M_matrix = M_matrix.reshape((6, 4))
+
+        opdc_kalman_pizeo_opd = numpy.dot(M_matrix,
+                self.opdc_kalman_piezo.T).T
+        PSD_k = [1, 2, 3, 4, 5, 6]
+        for baseline in range(0, 6):
+            f_k, PSD_k[baseline] = signal.welch(opdc_kalman_pizeo_opd[:,baseline],
+                    fs=(1./numpy.nanmean(numpy.diff(self.time))), detrend='linear',
+                    nperseg=1024, scaling='spectrum')
+
+            PSD_k[baseline] = numpy.sqrt(PSD_k[baseline])*1000.0
+        self.PSD_k = PSD_k
+        self.f_k = f_k
+
+    def getPlateScales(self):
+        retval = {}
+        for i in self.AcqCamDat.SCALE.data.keys():
+            retval[i] = numpy.mean(self.AcqCamDat.SCALE.data[i][numpy.isfinite(self.AcqCamDat.SCALE.data[i])])
+        return retval
+
+    def findVibrationPeaks(self, ax=None):
+        self.flattenPSDs()
+        self.peaks = {}
+        for baseline in range(0,6):
+            self.peaks[baseline] = {}
+            peaks = scipy.signal.find_peaks_cwt(self.flattenedPSD_k[baseline],
+                    numpy.arange(5,10))
+            diffs = self.f_k[numpy.diff(peaks)]
+            self.peaks[baseline]['freqs'] = []
+            self.peaks[baseline]['power'] = []
+            for i in range(len(diffs)):
+                if diffs[i] > 3:
+                    window = range(numpy.max([0, peaks[i]-3]), numpy.min([len(self.f_k), peaks[i]+3]))
+                    self.peaks[baseline]['freqs'].append(self.f_k[peaks[i]])
+                    self.peaks[baseline]['power'].append(scipy.integrate.trapz(self.PSD_k[baseline][window],
+                                                 x=self.f_k[window]))
+
+            self.peaks[baseline]['freqs'] = numpy.array(self.peaks[baseline]['freqs'])
+            self.peaks[baseline]['power'] = numpy.array(self.peaks[baseline]['power'])
+            
+            if ax != None:
+                #ax.clear()
+                ax.set_xscale('linear')
+                ax.set_yscale('linear')
+                ax.plot(self.f_k, self.PSD_k[baseline])
+                ax.figure.show()
+                raw_input()
+
+        return self.peaks
+
+    def flattenPSDs(self):
+        window = self.f_k > 15.0
+        self.flattenedPSD_k = []
+        for baseline in range(0,6):
+            A = numpy.log10(self.PSD_k[baseline][window])
+            model = numpy.array([numpy.ones(self.f_k[window].shape), numpy.log10(self.f_k[window])])
+            im = numpy.linalg.pinv(model)
+            SpectralSlope = im.T.dot(A.T)
+
+            fullModel = numpy.array([numpy.ones(self.f_k.shape), numpy.log10(self.f_k)])
+            self.flattenedPSD_k.append(self.PSD_k[baseline]/10.0**SpectralSlope.dot(fullModel))
+
+class GRAVITY_Dual_Sci_P2VM( GRAVITY_Dual_P2VM ):
     def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
             processAcqCamData=False):
         self.filename = fileBase+'_dualscip2vmred.fits'
@@ -545,21 +650,111 @@ class GRAVITY_Dual_Sci_P2VM( object ):
         self.FTName = header.get('ESO FT ROBJ NAME')
         self.FTMag = header.get('ESO FT ROBJ MAG')
         self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        self.ISS_Config = header.get('ESO ISS CONF T1NAME')[0]
+        self.FAFT1_CURX = header.get('ESO INS FAFT1 CURX')
+        self.FAFT1_CURY = header.get('ESO INS FAFT1 CURY')
+        self.FAFT2_CURX = header.get('ESO INS FAFT2 CURX')
+        self.FAFT2_CURY = header.get('ESO INS FAFT2 CURY')
+        self.FAFT3_CURX = header.get('ESO INS FAFT3 CURX')
+        self.FAFT3_CURY = header.get('ESO INS FAFT3 CURY')
+        self.FAFT4_CURX = header.get('ESO INS FAFT4 CURX')
+        self.FAFT4_CURY = header.get('ESO INS FAFT4 CURY')
+        self.FAFT5_CURX = header.get('ESO INS FAFT5 CURX')
+        self.FAFT5_CURY = header.get('ESO INS FAFT5 CURY')
+        self.FAFT6_CURX = header.get('ESO INS FAFT6 CURX')
+        self.FAFT6_CURY = header.get('ESO INS FAFT6 CURY')
+        self.FAFT7_CURX = header.get('ESO INS FAFT7 CURX')
+        self.FAFT7_CURY = header.get('ESO INS FAFT7 CURY')
+        self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
+        self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
         if processAcqCamData:
             imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
         else:
             imagingData = None
-        self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
+        try:
+            self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
                 fluxData=self.data,
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
                 CIAO_Data=CIAO_Data,
                 imagingData=imagingData)
-        self.AcqCamDat.binData()
-        self.AcqCamDat.calcMedian()
-        #self.getPupilMotion()
+            self.AcqCamDat.binData()
+            self.AcqCamDat.calcMedian()
+        except:
+            self.AcqCamDat = None
 
+class GRAVITY_Dual_Cal_P2VM( GRAVITY_Dual_P2VM ):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
+        self.filename = fileBase+'_dualcalp2vmred.fits'
+        self.startTime = startTime
+        HDU = pyfits.open(self.filename)
+        self.data = HDU["OI_FLUX"].data
+        self.opdc = HDU['OPDC'].data
+        self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
+        self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
+        self.time = self.opdc.field('TIME')/1e6
+        header = HDU["PRIMARY"].header
+        self.SObjMag = header.get('ESO INS SOBJ MAG')
+        self.SObjName = header.get('ESO INS SOBJ NAME')
+        self.AOInUse = header.get('ESO COU AO SYSTEM')
+        self.AO_Mag = header.get('ESO COU GUID MAG')
+        self.AO_Wave = header.get('ESO COU GUID WAVELEN')
+        self.Kal_Gain = header.get('ESO FT KAL GAIN')
+        self.Kal_Mode = header.get('ESO FT KAL MODE')
+        self.Derot1 = header.get('ESO INS DROT1 ENC')
+        self.Derot2 = header.get('ESO INS DROT2 ENC')
+        self.Derot3 = header.get('ESO INS DROT3 ENC')
+        self.Derot4 = header.get('ESO INS DROT4 ENC')
+        self.Derot5 = header.get('ESO INS DROT5 ENC')
+        self.Derot6 = header.get('ESO INS DROT6 ENC')
+        self.Derot7 = header.get('ESO INS DROT7 ENC')
+        self.Derot8 = header.get('ESO INS DROT8 ENC')
+        self.SOBJ_OFFX = header.get('ESO INS SOBJ OFFX')
+        self.SOBJ_OFFY = header.get('ESO INS SOBJ OFFY')
+        self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
+        self.FTName = header.get('ESO FT ROBJ NAME')
+        self.FTMag = header.get('ESO FT ROBJ MAG')
+        self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        self.ISS_Config = 'CAL'
+        self.FAFT1_CURX = header.get('ESO INS FAFT1 CURX')
+        self.FAFT1_CURY = header.get('ESO INS FAFT1 CURY')
+        self.FAFT2_CURX = header.get('ESO INS FAFT2 CURX')
+        self.FAFT2_CURY = header.get('ESO INS FAFT2 CURY')
+        self.FAFT3_CURX = header.get('ESO INS FAFT3 CURX')
+        self.FAFT3_CURY = header.get('ESO INS FAFT3 CURY')
+        self.FAFT4_CURX = header.get('ESO INS FAFT4 CURX')
+        self.FAFT4_CURY = header.get('ESO INS FAFT4 CURY')
+        self.FAFT5_CURX = header.get('ESO INS FAFT5 CURX')
+        self.FAFT5_CURY = header.get('ESO INS FAFT5 CURY')
+        self.FAFT6_CURX = header.get('ESO INS FAFT6 CURX')
+        self.FAFT6_CURY = header.get('ESO INS FAFT6 CURY')
+        self.FAFT7_CURX = header.get('ESO INS FAFT7 CURX')
+        self.FAFT7_CURY = header.get('ESO INS FAFT7 CURY')
+        self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
+        self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
+        if processAcqCamData:
+            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+        else:
+            imagingData = None
+        try:
+            self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
+                fluxData=self.data,
+                FTMag=self.FTMag, 
+                SCMag=self.SObjMag,
+                AcqDit=self.AcqCamDIT,
+                CIAO_Data=CIAO_Data,
+                imagingData=imagingData)
+            self.AcqCamDat.binData()
+            self.AcqCamDat.calcMedian()
+        except:
+            self.AcqCamDat = None
+
+class GRAVITY_Single_P2VM ( object ):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
+        return self
 
     def getPupilMotion(self):
         self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
@@ -627,6 +822,12 @@ class GRAVITY_Dual_Sci_P2VM( object ):
 
         return self.peaks
 
+    def getPlateScales(self):
+        retval = {}
+        for i in self.AcqCamDat.SCALE.data.keys():
+            retval[i] = numpy.mean(self.AcqCamDat.SCALE.data[i][numpy.isfinite(self.AcqCamDat.SCALE.data[i])])
+        return retval
+
 
 
     def flattenPSDs(self):
@@ -641,7 +842,8 @@ class GRAVITY_Dual_Sci_P2VM( object ):
             fullModel = numpy.array([numpy.ones(self.f_k.shape), numpy.log10(self.f_k)])
             self.flattenedPSD_k.append(self.PSD_k[baseline]/10.0**SpectralSlope.dot(fullModel))
 
-class GRAVITY_Single_Sci_P2VM( object ):
+
+class GRAVITY_Single_Sci_P2VM( GRAVITY_Single_P2VM ):
     def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
             processAcqCamData=False):
         self.filename = fileBase+'_singlescip2vmred.fits'
@@ -671,7 +873,23 @@ class GRAVITY_Single_Sci_P2VM( object ):
         self.SOBJ_OFFX = header.get('ESO INS SOBJ OFFX')
         self.SOBJ_OFFY = header.get('ESO INS SOBJ OFFY')
         swap = header.get('ESO INS SOBJ SWAP')
-        print asdf
+        self.ISS_Config = header.get('ESO ISS CONF T1NAME')[0]
+        self.FAFT1_CURX = header.get('ESO INS FAFT1 CURX')
+        self.FAFT1_CURY = header.get('ESO INS FAFT1 CURY')
+        self.FAFT2_CURX = header.get('ESO INS FAFT2 CURX')
+        self.FAFT2_CURY = header.get('ESO INS FAFT2 CURY')
+        self.FAFT3_CURX = header.get('ESO INS FAFT3 CURX')
+        self.FAFT3_CURY = header.get('ESO INS FAFT3 CURY')
+        self.FAFT4_CURX = header.get('ESO INS FAFT4 CURX')
+        self.FAFT4_CURY = header.get('ESO INS FAFT4 CURY')
+        self.FAFT5_CURX = header.get('ESO INS FAFT5 CURX')
+        self.FAFT5_CURY = header.get('ESO INS FAFT5 CURY')
+        self.FAFT6_CURX = header.get('ESO INS FAFT6 CURX')
+        self.FAFT6_CURY = header.get('ESO INS FAFT6 CURY')
+        self.FAFT7_CURX = header.get('ESO INS FAFT7 CURX')
+        self.FAFT7_CURY = header.get('ESO INS FAFT7 CURY')
+        self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
+        self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
         if swap != None:
             self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
         else:
@@ -683,97 +901,91 @@ class GRAVITY_Single_Sci_P2VM( object ):
             imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
         else:
             imagingData = None
-        self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
+        try:
+            self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
                 fluxData=self.data,
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
                 CIAO_Data=CIAO_Data,
                 imagingData=imagingData)
-        self.AcqCamDat.binData()
-        self.AcqCamDat.calcMedian()
-        #self.getPupilMotion()
+            self.AcqCamDat.binData()
+            self.AcqCamDat.calcMedian()
+            #self.getPupilMotion()
+        except:
+            self.AcqCamDat = None
 
-
-    def getPupilMotion(self):
-        self.TIME = (self.data.field('TIME')[::4]*1e-6)/86400.0+self.startTime.mjd
-        self.PUPIL_NSPOT = self.data.field('PUPIL_NSPOT')[::4]
-        self.PUPIL_X = {}
-        self.PUPIL_Y = {}
-        self.PUPIL_Z = {}
-        self.PUPIL_R = {}
-        self.PUPIL_U = {}
-        self.PUPIL_V = {}
-        self.PUPIL_W = {}
-        
-        for UT in [1, 2, 3, 4]:
-            self.PUPIL_X[UT] = self.data.field('PUPIL_X')[UT-1::4]
-            self.PUPIL_Y[UT] = self.data.field('PUPIL_Y')[UT-1::4]
-            self.PUPIL_Z[UT] = self.data.field('PUPIL_Z')[UT-1::4]
-            self.PUPIL_R[UT] = self.data.field('PUPIL_R')[UT-1::4]
-            self.PUPIL_U[UT] = self.data.field('PUPIL_U')[UT-1::4]
-            self.PUPIL_V[UT] = self.data.field('PUPIL_V')[UT-1::4]
-            self.PUPIL_W[UT] = self.data.field('PUPIL_W')[UT-1::4]
-
-    def computeOPDPeriodograms(self):
-        M_matrix = numpy.array([-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,-1.,0.0,0.0,1.,0.0,-1.,1.,0.0,0.0,-1.,0.0,1.,0.0,0.0,-1.,1.]);
-        M_matrix = M_matrix.reshape((6, 4))
-
-        opdc_kalman_pizeo_opd = numpy.dot(M_matrix,
-                self.opdc_kalman_piezo.T).T
-        PSD_k = [1, 2, 3, 4, 5, 6]
-        for baseline in range(0, 6):
-            f_k, PSD_k[baseline] = signal.welch(opdc_kalman_pizeo_opd[:,baseline],
-                    fs=(1./numpy.nanmean(numpy.diff(self.time))), detrend='linear',
-                    nperseg=1024, scaling='spectrum')
-
-            PSD_k[baseline] = numpy.sqrt(PSD_k[baseline])*1000.0
-        self.PSD_k = PSD_k
-        self.f_k = f_k
-
-    def findVibrationPeaks(self, ax=None):
-        self.flattenPSDs()
-        self.peaks = {}
-        for baseline in range(0,6):
-            self.peaks[baseline] = {}
-            peaks = scipy.signal.find_peaks_cwt(self.flattenedPSD_k[baseline],
-                    numpy.arange(5,10))
-            diffs = self.f_k[numpy.diff(peaks)]
-            self.peaks[baseline]['freqs'] = []
-            self.peaks[baseline]['power'] = []
-            for i in range(len(diffs)):
-                if diffs[i] > 3:
-                    window = range(numpy.max([0, peaks[i]-3]), numpy.min([len(self.f_k), peaks[i]+3]))
-                    self.peaks[baseline]['freqs'].append(self.f_k[peaks[i]])
-                    self.peaks[baseline]['power'].append(scipy.integrate.trapz(self.PSD_k[baseline][window],
-                                                 x=self.f_k[window]))
-
-            self.peaks[baseline]['freqs'] = numpy.array(self.peaks[baseline]['freqs'])
-            self.peaks[baseline]['power'] = numpy.array(self.peaks[baseline]['power'])
-            
-            if ax != None:
-                #ax.clear()
-                ax.set_xscale('linear')
-                ax.set_yscale('linear')
-                ax.plot(self.f_k, self.PSD_k[baseline])
-                ax.figure.show()
-                raw_input()
-
-        return self.peaks
-
-
-
-    def flattenPSDs(self):
-        window = self.f_k > 15.0
-        self.flattenedPSD_k = []
-        for baseline in range(0,6):
-            A = numpy.log10(self.PSD_k[baseline][window])
-            model = numpy.array([numpy.ones(self.f_k[window].shape), numpy.log10(self.f_k[window])])
-            im = numpy.linalg.pinv(model)
-            SpectralSlope = im.T.dot(A.T)
-
-            fullModel = numpy.array([numpy.ones(self.f_k.shape), numpy.log10(self.f_k)])
-            self.flattenedPSD_k.append(self.PSD_k[baseline]/10.0**SpectralSlope.dot(fullModel))
+class GRAVITY_Single_Cal_P2VM( GRAVITY_Single_P2VM ):
+    def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
+            processAcqCamData=False):
+        self.filename = fileBase+'_singlecalp2vmred.fits'
+        self.startTime = startTime
+        HDU = pyfits.open(self.filename)
+        self.data = HDU["OI_FLUX"].data
+        self.opdc = HDU['OPDC'].data
+        self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
+        self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
+        self.time = self.opdc.field('TIME')/1e6
+        header = HDU["PRIMARY"].header
+        self.SObjMag = header.get('ESO INS SOBJ MAG')
+        self.SObjName = header.get('ESO INS SOBJ NAME')
+        self.AOInUse = header.get('ESO COU AO SYSTEM')
+        self.AO_Mag = header.get('ESO COU GUID MAG')
+        self.AO_Wave = header.get('ESO COU GUID WAVELEN')
+        self.Kal_Gain = header.get('ESO FT KAL GAIN')
+        self.Kal_Mode = header.get('ESO FT KAL MODE')
+        self.Derot1 = header.get('ESO INS DROT1 ENC')
+        self.Derot2 = header.get('ESO INS DROT2 ENC')
+        self.Derot3 = header.get('ESO INS DROT3 ENC')
+        self.Derot4 = header.get('ESO INS DROT4 ENC')
+        self.Derot5 = header.get('ESO INS DROT5 ENC')
+        self.Derot6 = header.get('ESO INS DROT6 ENC')
+        self.Derot7 = header.get('ESO INS DROT7 ENC')
+        self.Derot8 = header.get('ESO INS DROT8 ENC')
+        self.SOBJ_OFFX = header.get('ESO INS SOBJ OFFX')
+        self.SOBJ_OFFY = header.get('ESO INS SOBJ OFFY')
+        swap = header.get('ESO INS SOBJ SWAP')
+        self.ISS_Config = 'CAL'
+        self.FAFT1_CURX = header.get('ESO INS FAFT1 CURX')
+        self.FAFT1_CURY = header.get('ESO INS FAFT1 CURY')
+        self.FAFT2_CURX = header.get('ESO INS FAFT2 CURX')
+        self.FAFT2_CURY = header.get('ESO INS FAFT2 CURY')
+        self.FAFT3_CURX = header.get('ESO INS FAFT3 CURX')
+        self.FAFT3_CURY = header.get('ESO INS FAFT3 CURY')
+        self.FAFT4_CURX = header.get('ESO INS FAFT4 CURX')
+        self.FAFT4_CURY = header.get('ESO INS FAFT4 CURY')
+        self.FAFT5_CURX = header.get('ESO INS FAFT5 CURX')
+        self.FAFT5_CURY = header.get('ESO INS FAFT5 CURY')
+        self.FAFT6_CURX = header.get('ESO INS FAFT6 CURX')
+        self.FAFT6_CURY = header.get('ESO INS FAFT6 CURY')
+        self.FAFT7_CURX = header.get('ESO INS FAFT7 CURX')
+        self.FAFT7_CURY = header.get('ESO INS FAFT7 CURY')
+        self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
+        self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
+        if swap != None:
+            self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
+        else:
+            self.SObjSwap = False
+        self.FTName = header.get('ESO FT ROBJ NAME')
+        self.FTMag = header.get('ESO FT ROBJ MAG')
+        self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
+        if processAcqCamData:
+            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+        else:
+            imagingData = None
+        try:
+            self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
+                fluxData=self.data,
+                FTMag=self.FTMag, 
+                SCMag=self.SObjMag,
+                AcqDit=self.AcqCamDIT,
+                CIAO_Data=CIAO_Data,
+                imagingData=imagingData)
+            self.AcqCamDat.binData()
+            self.AcqCamDat.calcMedian()
+            #self.getPupilMotion()
+        except:
+            self.AcqCamDat = None
 
 
 
@@ -803,8 +1015,11 @@ class GRAVITY_AstroReduced( object ):
 
 class GRAVITY_Data( object ):
     def __init__(self, fileBase='', UTS=[1,2,3,4], sqlCursor=None, CIAO_Data =
-            None, processAcqCamData=False):
-        self.datadir = os.environ.get('GRAVITY_DATA')
+            None, processAcqCamData=False, datadir=None):
+        if datadir != None:
+            self.datadir = datadir
+        else:
+            self.datadir = os.environ.get('GRAVITY_DATA')
         if self.datadir in fileBase:
             self.fileBase = str(fileBase[len(self.datadir):])
         else:
@@ -816,8 +1031,10 @@ class GRAVITY_Data( object ):
         #self.startTime = time.mktime(datetime.strptime(self.AstroReduced.masterheader.get('ESO PCR ACQ START'), '%Y-%m-%dT%H:%M:%S.%f').timetuple())
         self.startTime = aptime.Time(self.AstroReduced.masterheader.get('ESO PCR ACQ START'))
         self.AcqCamData = None
-        self.DualSciP2VM = None
         self.SingleSciP2VM = None
+        self.DualSciP2VM = None
+        self.SingleCalP2VM = None
+        self.DualCalP2VM = None
         if os.path.exists(self.datadir+self.fileBase+'_singlescip2vmred.fits'):
             self.SingleSciP2VM = GRAVITY_Single_Sci_P2VM(fileBase=self.datadir+self.fileBase,
                 startTime=self.startTime, CIAO_Data=CIAO_Data,
@@ -828,6 +1045,16 @@ class GRAVITY_Data( object ):
                 startTime=self.startTime, CIAO_Data=CIAO_Data,
                 processAcqCamData=processAcqCamData)
             self.AcqCamData = self.DualSciP2VM.AcqCamDat
+        elif os.path.exists(self.datadir+self.fileBase+'_singlecalp2vmred.fits'):
+            self.SingleCalP2VM = GRAVITY_Single_Sci_P2VM(fileBase=self.datadir+self.fileBase,
+                startTime=self.startTime, CIAO_Data=CIAO_Data,
+                processAcqCamData=processAcqCamData)
+            self.AcqCamData = self.SingleCalP2VM.AcqCamDat
+        elif os.path.exists(self.datadir+self.fileBase+'_dualcalp2vmred.fits'):
+            self.DualCalP2VM = GRAVITY_Dual_Cal_P2VM(fileBase=self.datadir+self.fileBase,
+                startTime=self.startTime, CIAO_Data=CIAO_Data,
+                processAcqCamData=processAcqCamData)
+            self.AcqCamData = self.DualCalP2VM.AcqCamDat
         self.DITTimes = {}
         self.SC_Fluxes = {}
         self.FT_Fluxes = {}
@@ -885,6 +1112,18 @@ class GRAVITY_Data( object ):
         if self.DualSciP2VM != None:
             return (self.DualSciP2VM.SOBJ_OFFX, self.DualSciP2VM.SOBJ_OFFY)
 
+    def getArrayConfig(self):
+        if self.SingleSciP2VM != None:
+            return self.SingleSciP2VM.ISS_Config
+        if self.DualSciP2VM != None:
+            return self.DualSciP2VM.ISS_Config
+
+    def getPlateScales(self):
+        if self.SingleSciP2VM != None:
+            return self.SingleSciP2VM.getPlateScales()
+        if self.DualSciP2VM != None:
+            return self.DualSciP2VM.getPlateScales()
+        
 
     def computeACQCAMStrehl(self):
         print asdf
@@ -1737,7 +1976,6 @@ class DataLogger( object ):
 
         ax.set_yscale('log')
         #ax.figure.show()
-        #print asdf
 
     def computePSD(self, source):
         NWindows = 1
