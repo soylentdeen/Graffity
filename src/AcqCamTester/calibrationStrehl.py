@@ -25,9 +25,9 @@ fig3 = pyplot.figure(3)
 ax3 = fig3.add_axes([0.1, 0.1, 0.8, 0.8])
 ax3.clear()
 
-datadir = '/home/cdeen/Data/GRAVITY/Strehl/'
-#df = glob.glob(datadir+'GRAVI*2017-08-09T02:41:37.564_dualscip2vmred.fits')
-df = glob.glob(datadir+'GRAVI*2017-08-10T02:21:54.904_dualscip2vmred.fits')
+datadir = '/home/cdeen/Data/GRAVITY/AcqCam/'
+df = glob.glob(datadir+'Calib*.fits')
+#df = glob.glob(datadir+'GRAVI*2017-08-10T02:21:54.904_dualscip2vmred.fits')
 
 subImageSize = 250
 
@@ -101,26 +101,9 @@ AcqFlux[3] = []
 AcqFlux[4] = []
 
 for f in df:
-    AcqCamImages = pyfits.getdata(f, ext=17)
-    AcqCamData = pyfits.getdata(f, ext=16)
-    FluxData = pyfits.getdata(f, ext=10)
-    AcqCamHeader = pyfits.getheader(f)
-    AcqTime = AcqCamData.field('TIME')[0::4]
-    FTX = AcqCamData.field('FIELD_FT_X')
-    FTX = numpy.array([FTX[0::4], FTX[1::4], FTX[2::4], FTX[3::4]])
-    FTY = AcqCamData.field('FIELD_FT_Y')
-    FTY = numpy.array([FTY[0::4], FTY[1::4], FTY[2::4], FTY[3::4]])
-    FTFlux = FluxData.field('TOTALFLUX_FT')
-    FTFlux = numpy.array([FTFlux[0::4], FTFlux[1::4], FTFlux[2::4], FTFlux[3::4]])
-    SCFlux = FluxData.field('TOTALFLUX_SC')
-    SCFlux = numpy.array([SCFlux[0::4], SCFlux[1::4], SCFlux[2::4], SCFlux[3::4]])
-    FluxTime = FluxData.field('TIME')[0::4]
-    for im, ftx, fty in zip(AcqCamImages, FTX.T, FTY.T):
-        for i in Telescopes:
-            startX = AcqCamHeader.get('ESO DET1 FRAM%d STRX' %i)
-            startY = AcqCamHeader.get('ESO DET1 FRAM%d STRY' %i)
-            xcoord = (ftx[i-1] - startX) + (i-1)*subImageSize
-            ycoord = fty[i-1] - startY
+    AcqCamImages = pyfits.getdata(f)
+    for im in AcqCamImages:
+        for i, xcoord, ycoord in zip(Telescopes, [124, 367, 618, 873], [86, 86, 95, 90]):
             AcqFlux[i].append(numpy.max(im[ycoord-1:ycoord+1,xcoord-1:xcoord+1]))
             ImageStack[i].append(im[ycoord-20:ycoord+19, xcoord-20:xcoord+19])
             ImageStack[i][-1] /= numpy.max(ImageStack[i][-1])
@@ -144,12 +127,8 @@ for i in Telescopes:
     Strehl[i] = numpy.array(Strehl[i])
     elipse[i] = numpy.array(elipse[i])
     AcqFlux[i] = numpy.array(AcqFlux[i])
-    binnedStrehl[i] = binStrehl(Strehl[i], AcqTime, FluxTime)
-    binnedEllipse[i] = binStrehl(elipse[i], AcqTime, FluxTime)
-    binnedAcqFlux[i] = binStrehl(AcqFlux[i], AcqTime, FluxTime)
     #ax.scatter(binnedEllipse[i], FTFlux[i-1], c=colors[i-1])
-    #ax.scatter(Strehl[i], elipse[i], c=colors[i-1])
-    ax.scatter(binnedAcqFlux[i], FTFlux[i-1], c=colors[i-1])
+    ax.scatter(Strehl[i], AcqFlux[i], c=colors[i-1])
     #ax.scatter(binnedStrehl[i], FTFlux[i-1], c=colors[i-1])
     #axes[i-1].matshow(ImageStack[i])
     axes[i-1].clear()
@@ -159,7 +138,7 @@ for i in Telescopes:
     ycross_section[i] = numpy.sum(ImageStack[i], axis=0)
     if numpy.sum(ycross_section[i]) > largestFlux:
         largestFlux = numpy.sum(ycross_section[i])
-    axes[i-1].matshow(ImageStack[i][10])
+    axes[i-1].matshow(numpy.median(ImageStack[i], axis=0))
     #axes[i-1].plot(xcross_section[i], c=colors[i-1])
     #axes[i-1].plot(ycross_section[i], c=colors[i-1])
     #axes[i-1].plot(numpy.sum(Perfect.PSF, axis=1), c='k')
@@ -172,9 +151,10 @@ for i in Telescopes:
 
 ax3.plot(numpy.sum(Perfect.PSF, axis=1), c='k')
 
-ax.set_xlabel("Peak Flux - AcqCam")
-ax.set_ylabel("FT Flux")
+ax.set_xlabel("H-band Strehl")
+ax.set_ylabel("Peak Flux")
+ax.set_title("Strehl on Calibration Images")
 fig.show()
-fig.savefig("Confirmation.png")
+fig.savefig("Calibration_Strehl.png")
 fig2.show()
 fig3.show()
