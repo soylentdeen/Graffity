@@ -125,8 +125,8 @@ class AcqCamData( object ):
         self.FT_X = BCI_Data(data=fiberData.field('FIELD_FT_X'), error=fiberData.field('FIELD_FT_XERR'))
         self.FT_Y = BCI_Data(data=fiberData.field('FIELD_FT_Y'), error=fiberData.field('FIELD_FT_YERR'))
         self.SCALE = BCI_Data(data=fiberData.field('FIELD_SCALE'), error=fiberData.field('FIELD_SCALEERR'))
-        self.SC_FIBER_DX = BCI_Data(data=fiberData.field('FIELD_SC_FIBER_DX'), error=fiberData.field('FIELD_SC_FIBER_DXERR'))
-        self.SC_FIBER_DY = BCI_Data(data=fiberData.field('FIELD_SC_FIBER_DY'), error=fiberData.field('FIELD_SC_FIBER_DYERR'))
+        self.SC_FIBER_DX = BCI_Data(data=fiberData.field('FIELD_FIBER_DX'), error=fiberData.field('FIELD_FIBER_DXERR'))
+        self.SC_FIBER_DY = BCI_Data(data=fiberData.field('FIELD_FIBER_DY'), error=fiberData.field('FIELD_FIBER_DYERR'))
         self.Pupil_X = BCI_Data(data=fiberData.field('PUPIL_X'))
         self.Pupil_Y = BCI_Data(data=fiberData.field('PUPIL_Y'))
         self.Pupil_Z = BCI_Data(data=fiberData.field('PUPIL_Z'))
@@ -136,21 +136,24 @@ class AcqCamData( object ):
         self.Pupil_W = BCI_Data(data=fiberData.field('PUPIL_W'))
         self.OPD_Pupil = BCI_Data(data=fiberData.field('OPD_PUPIL'))
 
-        self.BCI_Time = BCI_Data(fluxData.field('TIME'))
-        self.TOTALFLUX_SC = BCI_Data(fluxData.field('TOTALFLUX_SC'))
-        self.TOTALFLUX_FT = BCI_Data(fluxData.field('TOTALFLUX_FT'))
-        self.FDDL = BCI_Data(fluxData.field('FDDL'))
-        self.FT_Pos = BCI_Data(fluxData.field('FT_POS'))
-        self.SC_Pos = BCI_Data(fluxData.field('SC_POS'))
+        self.BCI_Time = BCI_Data(fluxData['TIME'])
+        self.TOTALFLUX_SC = BCI_Data(fluxData['TOTALFLUX_SC'])
+        self.TOTALFLUX_FT = BCI_Data(fluxData['TOTALFLUX_FT'])
+        self.FDDL = BCI_Data(fluxData['FDDL'])
+        self.FT_Pos = BCI_Data(fluxData['FT_POS'])
+        self.SC_Pos = BCI_Data(fluxData['SC_POS'])
 
         self.FTMag = FTMag
         self.SCMag = SCMag
         self.AcqDit = AcqDit
         self.CIAO_Data = CIAO_Data
+        self.AcqFT = None
+        self.AcqSC = None
         if imagingData != None:
-            self.xi, self.yi = numpy.meshgrid(numpy.arange(20),
-                    numpy.arange(20))
-            self.calcEllipse(imagingData)
+            #self.xi, self.yi = numpy.meshgrid(numpy.arange(20),
+            #        numpy.arange(20))
+            #self.calcEllipse(imagingData)
+            self.calcMaxPixel(imagingData)
 
     def binData(self):
         self.newStrehl = self.Strehl.rebin(self.Time, self.BCI_Time)
@@ -169,6 +172,10 @@ class AcqCamData( object ):
         self.newPupilV = self.Pupil_V.rebin(self.Time, self.BCI_Time)
         self.newPupilW = self.Pupil_W.rebin(self.Time, self.BCI_Time)
         self.newOPDPupil = self.OPD_Pupil.rebin(self.Time, self.BCI_Time)
+        if self.AcqFT != None:
+            self.newAcqFT = self.AcqFT.rebin(self.Time, self.BCI_Time)
+        if self.AcqSC != None:
+            self.newAcqSC = self.AcqSC.rebin(self.Time, self.BCI_Time)
 
 
     def calcMedian(self):
@@ -197,6 +204,33 @@ class AcqCamData( object ):
         ratio = fit[2]/fit[4]
         return ratio, fit[1], fit[3]
 
+    def calcMaxPixel(self, imagingData):
+        header = imagingData[0]
+        images = imagingData[1]
+        subImageSize = 250
+        FT = []
+        SC = []
+        for j, im in enumerate(images):
+            for i in [1, 2, 3, 4]:
+                startX = header.get('ESO DET1 FRAM%d STRX' %i)
+                startY = header.get('ESO DET1 FRAM%d STRY' %i)
+                xcoord = (self.FT_X.data[i-1][j] - startX) + (i-1)*subImageSize
+                ycoord = self.FT_Y.data[i-1][j] - startY
+                try:
+                    FT.append(numpy.max(im[int(ycoord-3):int(ycoord+3),
+                        int(xcoord-3):int(xcoord+3)]))
+                except:
+                    FT.append(numpy.nan)
+                xcoord = (self.SC_X.data[i-1][j] - startX) + (i-1)*subImageSize
+                ycoord = self.SC_Y.data[i-1][j] - startY
+                try:
+                    SC.append(numpy.max(im[int(ycoord-3):int(ycoord+3),
+                         int(xcoord-3):int(xcoord+3)]))
+                except:
+                    SC.append(numpy.nan)
+        self.AcqFT = BCI_Data(data = numpy.array(FT))
+        self.AcqSC = BCI_Data(data = numpy.array(SC))
+        
     def calcEllipse(self, imagingData):
         header = imagingData[0]
         images = imagingData[1]
@@ -625,12 +659,49 @@ class GRAVITY_Dual_Sci_P2VM( GRAVITY_Dual_P2VM ):
         self.filename = fileBase+'_dualscip2vmred.fits'
         self.startTime = startTime
         HDU = pyfits.open(self.filename)
-        self.data = HDU["OI_FLUX"].data
+        indices = []
+        extnames = []
+        for i, h in enumerate(HDU):
+            extnames.append(h.name)
+            indices.append(i)
+        self.indices = numpy.array(indices)
+        self.extnames = numpy.array(extnames)
         self.opdc = HDU['OPDC'].data
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
         self.time = self.opdc.field('TIME')/1e6
         header = HDU["PRIMARY"].header
+        self.polarization = header.get('ESO INS POLA MODE')
+        SC = None
+        FT = None
+        if self.polarization == 'SPLIT':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    if SC == None:
+                        SC = HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = HDU[oi].data.field("TOTALFLUX_FT")
+                    else:
+                        SC = SC + HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = FT + HDU[oi].data.field("TOTALFLUX_FT")
+        elif self.polarization == 'COMBINED':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    SC = HDU[oi].data.field("TOTALFLUX_SC")
+                    FT = HDU[oi].data.field("TOTALFLUX_FT")
+        self.TOTALFLUX_SC = SC
+        self.TOTALFLUX_FT = FT
+        self.BCI_Time = BCI_Time
+        self.FDDL = FDDL
+        self.FT_POS = FT_POS
+        self.SC_POS = SC_POS
         self.SObjMag = header.get('ESO INS SOBJ MAG')
         self.SObjName = header.get('ESO INS SOBJ NAME')
         self.AOInUse = header.get('ESO COU AO SYSTEM')
@@ -670,21 +741,25 @@ class GRAVITY_Dual_Sci_P2VM( GRAVITY_Dual_P2VM ):
         self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
         self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
         if processAcqCamData:
-            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+            for a in self.indices[self.extnames == 'IMAGING_DATA_ACQ']:
+                if HDU[a].data.shape[0] > 1:
+                    break
+            imagingData = (header,HDU[a].data)
         else:
             imagingData = None
-        try:
-            self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
-                fluxData=self.data,
+        #try:
+        self.AcqCamDat = AcqCamData(fiberData=HDU[self.indices[self.extnames=="OI_VIS_ACQ"][0]].data,
+                fluxData={"TOTALFLUX_FT":self.TOTALFLUX_FT,"TOTALFLUX_SC":self.TOTALFLUX_SC,"TIME":self.BCI_Time,"FDDL":self.FDDL,
+                    "FT_POS": self.FT_POS, "SC_POS":self.SC_POS},
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
                 CIAO_Data=CIAO_Data,
                 imagingData=imagingData)
-            self.AcqCamDat.binData()
-            self.AcqCamDat.calcMedian()
-        except:
-            self.AcqCamDat = None
+        self.AcqCamDat.binData()
+        self.AcqCamDat.calcMedian()
+        #except:
+        #    self.AcqCamDat = None
 
 class GRAVITY_Dual_Cal_P2VM( GRAVITY_Dual_P2VM ):
     def __init__(self, fileBase = '', startTime=0.0, CIAO_Data=None,
@@ -692,12 +767,49 @@ class GRAVITY_Dual_Cal_P2VM( GRAVITY_Dual_P2VM ):
         self.filename = fileBase+'_dualcalp2vmred.fits'
         self.startTime = startTime
         HDU = pyfits.open(self.filename)
-        self.data = HDU["OI_FLUX"].data
+        indices = []
+        extnames = []
+        for i, h in enumerate(HDU):
+            extnames.append(h.name)
+            indices.append(i)
+        self.indices = numpy.array(indices)
+        self.extnames = numpy.array(extnames)
         self.opdc = HDU['OPDC'].data
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
         self.time = self.opdc.field('TIME')/1e6
         header = HDU["PRIMARY"].header
+        self.polarization = header.get('ESO INS POLA MODE')
+        SC = None
+        FT = None
+        if self.polarization == 'SPLIT':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    if SC == None:
+                        SC = HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = HDU[oi].data.field("TOTALFLUX_FT")
+                    else:
+                        SC = SC + HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = FT + HDU[oi].data.field("TOTALFLUX_FT")
+        elif self.polarization == 'COMBINED':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    SC = HDU[oi].data.field("TOTALFLUX_SC")
+                    FT = HDU[oi].data.field("TOTALFLUX_FT")
+        self.TOTALFLUX_SC = SC
+        self.TOTALFLUX_FT = FT
+        self.BCI_Time = BCI_Time
+        self.FDDL = FDDL
+        self.FT_POS = FT_POS
+        self.SC_POS = SC_POS
         self.SObjMag = header.get('ESO INS SOBJ MAG')
         self.SObjName = header.get('ESO INS SOBJ NAME')
         self.AOInUse = header.get('ESO COU AO SYSTEM')
@@ -737,12 +849,16 @@ class GRAVITY_Dual_Cal_P2VM( GRAVITY_Dual_P2VM ):
         self.FAFT8_CURX = header.get('ESO INS FAFT8 CURX')
         self.FAFT8_CURY = header.get('ESO INS FAFT8 CURY')
         if processAcqCamData:
-            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+            for a in self.indices[self.extnames == 'IMAGING_DATA_ACQ']:
+                if HDU[a].data.shape[0] > 1:
+                    break
+            imagingData = (header,HDU[a].data)
         else:
             imagingData = None
         try:
             self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
-                fluxData=self.data,
+                fluxData={"TOTALFLUX_FT":self.TOTALFLUX_FT,"TOTALFLUX_SC":self.TOTALFLUX_SC,"TIME":self.BCI_Time,"FDDL":self.FDDL,
+                    "FT_POS": self.FT_POS, "SC_POS":self.SC_POS},
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
@@ -851,12 +967,49 @@ class GRAVITY_Single_Sci_P2VM( GRAVITY_Single_P2VM ):
         self.filename = fileBase+'_singlescip2vmred.fits'
         self.startTime = startTime
         HDU = pyfits.open(self.filename)
-        self.data = HDU["OI_FLUX"].data
+        indices = []
+        extnames = []
+        for i, h in enumerate(HDU):
+            extnames.append(h.name)
+            indices.append(i)
+        self.indices = numpy.array(indices)
+        self.extnames = numpy.array(extnames)
         self.opdc = HDU['OPDC'].data
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
         self.time = self.opdc.field('TIME')/1e6
         header = HDU["PRIMARY"].header
+        self.polarization = header.get('ESO INS POLA MODE')
+        SC = None
+        FT = None
+        if self.polarization == 'SPLIT':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    if SC == None:
+                        SC = HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = HDU[oi].data.field("TOTALFLUX_FT")
+                    else:
+                        SC = SC + HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = FT + HDU[oi].data.field("TOTALFLUX_FT")
+        elif self.polarization == 'COMBINED':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    SC = HDU[oi].data.field("TOTALFLUX_SC")
+                    FT = HDU[oi].data.field("TOTALFLUX_FT")
+        self.TOTALFLUX_SC = SC
+        self.TOTALFLUX_FT = FT
+        self.BCI_Time = BCI_Time
+        self.FDDL = FDDL
+        self.FT_POS = FT_POS
+        self.SC_POS = SC_POS
         self.SObjMag = header.get('ESO INS SOBJ MAG')
         self.SObjName = header.get('ESO INS SOBJ NAME')
         self.AOInUse = header.get('ESO COU AO SYSTEM')
@@ -900,12 +1053,16 @@ class GRAVITY_Single_Sci_P2VM( GRAVITY_Single_P2VM ):
         self.FTMag = header.get('ESO FT ROBJ MAG')
         self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
         if processAcqCamData:
-            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+            for a in self.indices[self.extnames == 'IMAGING_DATA_ACQ']:
+                if HDU[a].data.shape[0] > 1:
+                    break
+            imagingData = (header,HDU[a].data)
         else:
             imagingData = None
         try:
             self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
-                fluxData=self.data,
+                fluxData={"TOTALFLUX_FT":self.TOTALFLUX_FT,"TOTALFLUX_SC":self.TOTALFLUX_SC,"TIME":self.BCI_Time,"FDDL":self.FDDL,
+                    "FT_POS": self.FT_POS, "SC_POS":self.SC_POS},
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
@@ -923,12 +1080,49 @@ class GRAVITY_Single_Cal_P2VM( GRAVITY_Single_P2VM ):
         self.filename = fileBase+'_singlecalp2vmred.fits'
         self.startTime = startTime
         HDU = pyfits.open(self.filename)
-        self.data = HDU["OI_FLUX"].data
+        indices = []
+        extnames = []
+        for i, h in enumerate(HDU):
+            extnames.append(h.name)
+            indices.append(i)
+        self.indices = numpy.array(indices)
+        self.extnames = numpy.array(extnames)
         self.opdc = HDU['OPDC'].data
         self.opdc_kalman_piezo = self.opdc.field('KALMAN_PIEZO')  # Time, telescope
         self.opdc_kalman_opd = self.opdc.field('KALMAN_OPD')
         self.time = self.opdc.field('TIME')/1e6
         header = HDU["PRIMARY"].header
+        self.polarization = header.get('ESO INS POLA MODE')
+        SC = None
+        FT = None
+        if self.polarization == 'SPLIT':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    if SC == None:
+                        SC = HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = HDU[oi].data.field("TOTALFLUX_FT")
+                    else:
+                        SC = SC + HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = FT + HDU[oi].data.field("TOTALFLUX_FT")
+        elif self.polarization == 'COMBINED':
+            for oi in self.indices[self.extnames=='OI_FLUX']:
+                if ('TOTALFLUX_FT' in HDU[oi].data.names):
+                    BCI_Time = HDU[oi].data.field("TIME")
+                    FDDL = HDU[oi].data.field("FDDL")
+                    FT_POS = HDU[oi].data.field("FT_POS")
+                    SC_POS = HDU[oi].data.field("SC_POS")
+                    SC = HDU[oi].data.field("TOTALFLUX_SC")
+                    FT = HDU[oi].data.field("TOTALFLUX_FT")
+        self.TOTALFLUX_SC = SC
+        self.TOTALFLUX_FT = FT
+        self.BCI_Time = BCI_Time
+        self.FDDL = FDDL
+        self.FT_POS = FT_POS
+        self.SC_POS = SC_POS
         self.SObjMag = header.get('ESO INS SOBJ MAG')
         self.SObjName = header.get('ESO INS SOBJ NAME')
         self.AOInUse = header.get('ESO COU AO SYSTEM')
@@ -972,12 +1166,16 @@ class GRAVITY_Single_Cal_P2VM( GRAVITY_Single_P2VM ):
         self.FTMag = header.get('ESO FT ROBJ MAG')
         self.AcqCamDIT = header.get('ESO DET1 SEQ1 DIT')
         if processAcqCamData:
-            imagingData = (header,HDU["IMAGING_DATA_ACQ",1])
+            for a in self.indices[self.extnames == 'IMAGING_DATA_ACQ']:
+                if HDU[a].data.shape[0] > 1:
+                    break
+            imagingData = (header,HDU[a].data)
         else:
             imagingData = None
         try:
             self.AcqCamDat = AcqCamData(fiberData=HDU["OI_VIS_ACQ"].data,
-                fluxData=self.data,
+                fluxData={"TOTALFLUX_FT":self.TOTALFLUX_FT,"TOTALFLUX_SC":self.TOTALFLUX_SC,"TIME":self.BCI_Time,"FDDL":self.FDDL,
+                    "FT_POS": self.FT_POS, "SC_POS":self.SC_POS},
                 FTMag=self.FTMag, 
                 SCMag=self.SObjMag,
                 AcqDit=self.AcqCamDIT,
@@ -988,7 +1186,6 @@ class GRAVITY_Single_Cal_P2VM( GRAVITY_Single_P2VM ):
             #self.getPupilMotion()
         except:
             self.AcqCamDat = None
-
 
 
 class GRAVITY_Dual_SciVis( object ):
@@ -1578,15 +1775,18 @@ class DataLogger( object ):
         self.TTM2Z = pyfits.getdata(self.cimdatDir+
                                     'cimdatTTM2Z.fits', ignore_missing_end = True)
         self.Z2DM = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
-                                   'RecnOptimiser.Z2DM.fits', ignore_missing_end=True)
+                                   'RecnOptimiser.Z2DM.fits',
+                                   ignore_missing_end=True)[:,:60]
         self.NZernikes = self.Z2DM.shape[1]
         self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(self.NZernikes)])
+        #self.ZIn = numpy.array([(i >= 3) & (i < 99) for i in range(59)])
         #self.DM2Z = linalg.pinv(self.Z2DM)
         self.DM2Z = pyfits.getdata(self.CDMS_BaseDir+str(self.CIAO_ID)+self.CDMS_ConfigDir+
                                    'RecnOptimiser.DM2Z.fits', ignore_missing_end=True)
         #self.S2Z = self.DM2Z.dot(self.CM[:60])
         #self.Z2S = linalg.pinv(self.S2Z)
-        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T, self.TTM2Z.T))
+        self.Voltage2Zernike = numpy.concatenate((self.DM2Z.T,
+            self.TTM2Z.T))[:,:59]
         self.Zernike2Slopes =  pyfits.getdata(self.cimdatDir+'cimdatZernike2Slopes.fits')
         self.S2Z = linalg.pinv(self.Zernike2Slopes)
         try:
@@ -1953,7 +2153,7 @@ class DataLogger( object ):
         self.Gradients -= numpy.mean(self.Gradients, axis=0)
         
     def zernikeSpace(self):
-        self.ZSlopes = self.Gradients.dot(self.S2Z.T)
+        self.ZSlopes = self.Gradients.dot(self.S2Z)
         self.ZCommands = numpy.concatenate((self.HODM.T, self.TTM.T)).T.dot(self.Voltage2Zernike)
         
     def pupilIllumination(self, ax):
@@ -2068,7 +2268,8 @@ class DataLogger( object ):
         RTC2 = numpy.abs(self.RTC)**2.0
 
         RTC2S = numpy.array([RTC2 * self.ZPowerSlopes[:,n] for n in range(self.ZPowerSlopes.shape[1])]).T
-        self.ZPowerCommands = (RTC2S.T + [RTC2*self.ZPowerCommands[:,n] for n in range(self.ZPowerCommands.shape[1])])/(1.0+RTC2).T
+        self.ZPowerCommands = (RTC2S.T + [RTC2*self.ZPowerCommands[:,n] for n in
+            range(self.ZPowerCommands.shape[1])])/(1.0+RTC2).T
         self.ZPowerSlopes = self.ZPowerCommands/RTC2
         
 
@@ -2224,6 +2425,12 @@ class DataLogger( object ):
         self.WFSNoise = numpy.sqrt(numpy.mean(Noise[self.ZIn])/numpy.mean(ReferenceNoise[self.ZIn]))
         #self.ZPowerNoise = Reference * self.WFSNoise**2.0
         self.ZPowerNoise = self.WFSNoise**2.0 * numpy.ones([self.ZPowerFrequencies.shape[0],1]).dot(numpy.array([numpy.sum(self.S2Z**2.0, axis=1)]))/numpy.max(self.ZPowerFrequencies)
+
+    def computeResiduals(self):
+        Residuals = []
+        for frame in self.Gradients:
+            Residuals.append(self.S2Z.T.dot(frame))
+        self.Residuals = numpy.array(Residuals)
 
     def computeTTResiduals(self, saveData=False):
         TTR = []
