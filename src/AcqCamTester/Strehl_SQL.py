@@ -310,11 +310,12 @@ for Grav in GravityVals:
     #if ((CIAO_Data != None)):
     #if ((CIAO_Data != None) and (Grav[1] == 'S2') and (Grav[0] == 'IRS16C')):
     #if ((Grav[0] == 'WDS_J16003-2237AB')):
-    #if ((Grav[4] == 'CIAO') and (Grav[1]=='S2') and (Grav[0] == 'IRS16C')):
+    #if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
     #if ((Grav[4] == 'CIAO') and (Grav[0] == 'WDS_J15348+1032A')): 
-    if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
+    if ((Grav[4] == 'CIAO') and (Grav[1]=='S2') and (Grav[0] == 'IRS16C')):
         GravData.append(Graffity.GRAVITY_Data(fileBase=Grav[-1],
             CIAO_Data=CIAO_Data, processAcqCamData=False))
+        print asdf
         print Grav[-1]
 
         

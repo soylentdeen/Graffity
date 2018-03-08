@@ -213,10 +213,22 @@ class PSF( object ):
         self.lam = lam*1.0e-6
         self.dlam = dlam*1.0e-6
         self.pscale = pscale * 2.0 *numpy.pi/360.0/60.0**2.0/1.0e3
+        #self.pscale = pscale/360.0/60.0**2.0/1.0e3
         self.M1 = M1
         self.M2 = M2
         self.nLambdaSteps = nLambdaSteps
         self.fmax = self.M1 * self.pscale * self.sizeInPix/self.lam
+        self.Zernikes = []
+        for i in range(50):
+            self.Zernikes.append(zernikeMode(i, 0.0))
+
+    def setZern(self, zern):
+        """
+            Sets the magnitudes of the Zernike components.
+        """
+        nzern = len(zern)
+        for i in range(nzern):
+            self.Zernikes[i].setMag(zern[i]*2.0*numpy.pi/self.lam)
 
     def Sinc(self, x):
         if numpy.abs(x) < 1e-4:
@@ -248,41 +260,54 @@ class PSF( object ):
         retval = (self.G(f, 1.0) + u**2.0*self.G(f/u, 1) - 2*self.G(f, u))/(1.0 - u**2.0)
         return retval
 
-    def generateOTF(self):
-        total = numpy.zeros([self.sizeInPix, self.sizeInPix])
-        for k in numpy.arange(self.nLambdaSteps):
-            l = self.lam - self.dlam*(k - self.nLambdaSteps/2.0)/(self.nLambdaSteps - 1)
-            fc = self.fmax*self.lam/l
+    def generateOTF(self, ax=None):
+        total = numpy.zeros([self.sizeInPix, self.sizeInPix], dtype=numpy.complex)
 
-            for i in range(self.sizeInPix):
-                for j in range(self.sizeInPix):
-                    y = j - self.sizeInPix/2.0 + 0.5
-                    x = i - self.sizeInPix/2.0 + 0.5
-                    r = numpy.sqrt(x**2.0 + y**2.0)
+        for i in range(self.sizeInPix):
+            for j in range(self.sizeInPix):
+                y = j - self.sizeInPix/2.0 + 0.5
+                x = i - self.sizeInPix/2.0 + 0.5
+                r = numpy.sqrt(x**2.0 + y**2.0)
+                value = 0.0
+                phase = 0.0
+                for k in numpy.arange(self.nLambdaSteps):
+                    l = self.lam - self.dlam*(k - self.nLambdaSteps/2.0)/(self.nLambdaSteps-1)
+                    fc = self.fmax*self.lam/l
                     f = r/fc
                     if f < 1:
                         if r < 0.1:
-                            total[i, j] += 1.0/self.nLambdaSteps
+                            value += 1.0/self.nLambdaSteps
                         else:
-                            total[i, j] += (self.TelOTF(f, self.M2/self.M1)*self.Sinc(numpy.pi*x/self.sizeInPix)
-                                                       *self.Sinc(numpy.pi*y/self.sizeInPix))/self.nLambdaSteps
-                    else:
-                        total[i, j] += 0.0
+                            value += (self.TelOTF(f, self.M2/self.M1)*
+                                            self.Sinc(numpy.pi*x/self.sizeInPix)*
+                                            self.Sinc(numpy.pi*y/self.sizeInPix))/self.nLambdaSteps
+                        if k==0:
+                            phi = numpy.arctan2(y, x)
+                            for z in self.Zernikes:
+                                phase += z.zernike(f, phi)
+
+                #total[i, j] = value*numpy.exp(numpy.complex(0.0, 2.0*numpy.pi*phase))
+                total[i, j] = value*numpy.exp(numpy.complex(0.0, phase))
         self.OTF = total
-        self.PSF = numpy.fft.fftshift(numpy.abs(numpy.fft.fft2(self.OTF)))
+        self.PSF = numpy.fft.fftshift(numpy.fft.fft2(self.OTF))
+        self.PSF = ((self.PSF*self.PSF.conj())**0.5).real
         self.PSF = self.normalize(self.PSF)
+        if ax != None:
+            ax.matshow(numpy.imag(self.OTF))
+            ax.figure.show()
+            raw_input()
 
     def getPSF(self):
         return self.PSF
 
     def normalize(self, image):
-        return image/numpy.max(image)
+        return image/numpy.sum(image)
 
     def calcStrehl(self, cutout):
-        factor = numpy.sum(self.PSF) / numpy.sum(cutout)
-        if numpy.max(cutout)*factor > 1.3:
+        factor = numpy.max(cutout) / numpy.max(self.PSF)
+        if factor > 1.0:
             raise
-        return numpy.max(cutout)*factor
+        return factor
         
 
 
@@ -628,8 +653,6 @@ class GRAVITY_Dual_Sci_P2VM( object ):
                 raw_input()
 
         return self.peaks
-
-
 
     def flattenPSDs(self):
         window = self.f_k > 15.0
@@ -3218,14 +3241,30 @@ class zernikeMode(object):
         input:  noll - Noll index
                 mag - magnitude of Zernike mode - Units?
         """
+        i = 0
+        n = 0
+        m = 0
+        while ( i != noll):
+            if m == n:
+                n += 1
+                m = -n
+            else:
+                m += 2
+            i = (n*(n+2) + m)/2.0
+        self.n = n
+        self.m = m
         self.mag = mag
-        if (noll == 2):
+        """
+        if (noll == 1):    # Piston
+            self.n = 0
+            self.m = 0
+        elif (noll == 2):  # Tip
             self.n = 1
             self.m = 1
-        elif (noll == 3):
+        elif (noll == 3):  # Tilt
             self.n = 1
             self.m = -1
-        elif (noll == 4):
+        elif (noll == 4):  # Defocus
             self.n = 2
             self.m = 0
         elif (noll == 5):
@@ -3234,9 +3273,37 @@ class zernikeMode(object):
         elif (noll == 6):
             self.n = 2
             self.m = 2
+        elif (noll == 7):
+            self.n = 3
+            self.m = -1
+        elif (noll == 8):
+            self.n = 3
+            self.m = 1
+        elif (noll == 9):
+            self.n = 3
+            self.m = -3
+        elif (noll == 10):
+            self.n = 3
+            self.m = 3
+        elif (noll == 11):
+            self.n = 4
+            self.m = 0
+        elif (noll == 12):
+            self.n = 4
+            self.m = 2
+        elif (noll == 13):
+            self.n = 4
+            self.m = -2
+        elif (noll == 14):
+            self.n = 4
+            self.m = 4
+        elif (noll == 15):
+            self.n = 4
+            self.m = -4
         else:
             self.n = 0
             self.m = 0
+        """
 
     def zernike_rad(self, rho):
         n=abs(self.n)

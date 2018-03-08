@@ -4,7 +4,7 @@ import numpy
 import glob
 import Graffity
 
-datadir = '/home/cdeen/Data/GRAVITY/Raw/reduced/'
+datadir = '/home/cdeen/Data/GRAVITY/Calibration/reduced/'
 
 fig0 = pyplot.figure(0)
 fig0.clear()
@@ -19,8 +19,8 @@ fig3 = pyplot.figure(3)
 fig3.clear()
 ax3 = fig3.add_axes([0.1 ,0.1 , 0.8, 0.8])
 
-#source = "Fringe Tracker"
-source = "Science Camera"
+source = "Fringe Tracker"
+#source = "Science Camera"
 
 size = 20
 
@@ -45,33 +45,59 @@ for j, f in enumerate(glob.glob(datadir+'*singlescip2vmred.fits')):
     print f
     HDU = pyfits.open(f)
     primary = HDU["PRIMARY"].header
-    AcqCam = HDU[17].data[0]
-    SC = HDU[10].data.field("TOTALFLUX_FT")
-    FT = HDU[10].data.field("TOTALFLUX_SC")
+    resolution = primary.get('ESO INS SPEC RES')
+    polarization = primary.get('ESO INS POLA MODE')
+    indices = []
+    extnames = []
+    for i, h in enumerate(HDU):
+        extnames.append(h.name)
+        indices.append(i)
+    indices = numpy.array(indices)
+    extnames = numpy.array(extnames)
+    AcqCamIndices = indices[extnames == 'IMAGING_DATA_ACQ']
+    if (len(AcqCamIndices > 0) and resolution == "MEDIUM"):
+        for a in AcqCamIndices:
+            if HDU[a].data.shape[2] != 1:
+                break
+        AcqCam = HDU[a].data[0]
 
+        OIFluxIndices = indices[extnames == 'OI_FLUX']
+        SC = None
+        FT = None
+        if polarization == 'SPLIT':
+            for oi in OIFluxIndices:
+                if ("TOTALFLUX_FT" in HDU[oi].data.names):
+                    if SC == None:
+                        SC = HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = HDU[oi].data.field("TOTALFLUX_FT")
+                    else:
+                        SC = SC + HDU[oi].data.field("TOTALFLUX_SC")
+                        FT = FT + HDU[oi].data.field("TOTALFLUX_FT")
+        elif polarization == 'COMBINED':
+            for oi in OIFluxIndices:
+                if ("TOTALFUX_FT" in HDU[oi].data.names):
+                    SC = HDU[oi].data.field("TOTALFLUX_SC")
+                    FT = HDU[oi].data.field("TOTALFLUX_FT")
+        if (SC != None and (primary.get('ESO ACQ FIBER FT1X') != None)):
 
-    ax0.clear()
-    ax1.clear()
-    ax2.clear()
-    ax3.clear()
-    FT_entry = []
-    SC_entry = []
-    Acq_FT_entry = []
-    Acq_SC_entry = []
-    for i in telescopes:
-        startX = primary.get("ESO DET1 FRAM%d STRX" %i)
-        startY = primary.get("ESO DET1 FRAM%d STRY" %i)
-        xcoord_FT = primary.get("ESO ACQ FIBER FT%dX" % i) - startX + (i-1)*250
-        ycoord_FT = primary.get("ESO ACQ FIBER FT%dY" % i) - startY
-        xcoord_SC = primary.get("ESO ACQ FIBER SC%dX" % i) - startX + (i-1)*250
-        ycoord_SC = primary.get("ESO ACQ FIBER SC%dY" % i) - startY
-        print ("Telescope %d : Fringe Tracker Flux = %f, Science Camera Flux = %f" % (i, numpy.mean(FT[i-1::4]), numpy.mean(SC[i-1::4])))
-        FT_entry.append(numpy.mean(FT[i-1::4]))
-        SC_entry.append(numpy.mean(SC[i-1::4]))
-        Acq_FT_entry.append(numpy.max(AcqCam[int(ycoord_FT-3):int(ycoord_FT+3), int(xcoord_FT-3):int(xcoord_FT+3)]))
-        Acq_SC_entry.append(numpy.max(AcqCam[int(ycoord_SC-3):int(ycoord_SC+3), int(xcoord_SC-3):int(xcoord_SC+3)]))
-        #B_entry.append(numpy.sum(AcqCam[int(ycoord_SC-3):int(ycoord_SC+3), int(xcoord_SC-3):int(xcoord_SC+3)]))
-        """
+            FT_entry = []
+            SC_entry = []
+            Acq_FT_entry = []
+            Acq_SC_entry = []
+            for i in telescopes:
+                startX = primary.get("ESO DET1 FRAM%d STRX" %i)
+                startY = primary.get("ESO DET1 FRAM%d STRY" %i)
+                xcoord_FT = primary.get("ESO ACQ FIBER FT%dX" % i) - startX + (i-1)*250
+                ycoord_FT = primary.get("ESO ACQ FIBER FT%dY" % i) - startY
+                xcoord_SC = primary.get("ESO ACQ FIBER SC%dX" % i) - startX + (i-1)*250
+                ycoord_SC = primary.get("ESO ACQ FIBER SC%dY" % i) - startY
+                print ("Telescope %d : Fringe Tracker Flux = %f, Science Camera Flux = %f" % (i, numpy.mean(FT[i-1::4]), numpy.mean(SC[i-1::4])))
+                FT_entry.append(numpy.mean(FT[i-1::4]))
+                SC_entry.append(numpy.mean(SC[i-1::4]))
+                Acq_FT_entry.append(numpy.sum(AcqCam[int(ycoord_FT-3):int(ycoord_FT+3), int(xcoord_FT-3):int(xcoord_FT+3)]))
+                Acq_SC_entry.append(numpy.sum(AcqCam[int(ycoord_SC-3):int(ycoord_SC+3), int(xcoord_SC-3):int(xcoord_SC+3)]))
+                #B_entry.append(numpy.sum(AcqCam[int(ycoord_SC-3):int(ycoord_SC+3), int(xcoord_SC-3):int(xcoord_SC+3)]))
+                """
         if AcqCam[int(ycoord_FT), int(xcoord_FT)] > 1000.0:
             FT_PostageStamp = AcqCam[int(ycoord_FT-size):int(ycoord_FT+size), int(xcoord_FT-size):int(xcoord_FT+size)]
             FT_Strehl = Perfect.calcStrehl(FT_PostageStamp)
@@ -86,11 +112,19 @@ for j, f in enumerate(glob.glob(datadir+'*singlescip2vmred.fits')):
             ax1.plot(numpy.sum(SC_PostageStamp, axis=0), color = colors[i-1], label="Tel %d SR = %.3f, Flux = %d" % (i, SC_Strehl, SCFlux))
             ax1.set_xlabel("AcqCam SC Object" % SC_Strehl)
         #"""
-    if not (j in [4, 7, 8]):
-        SC_table.append(numpy.array(SC_entry))
-        FT_table.append(numpy.array(FT_entry))
-        Acq_FT_table.append(numpy.array(Acq_FT_entry))
-        Acq_SC_table.append(numpy.array(Acq_SC_entry))
+            #if not (j in [4, 7, 8]):
+            if True:
+                SC_table.append(numpy.array(SC_entry))
+                FT_table.append(numpy.array(FT_entry))
+                Acq_FT_table.append(numpy.array(Acq_FT_entry))
+                Acq_SC_table.append(numpy.array(Acq_SC_entry))
+        """else:
+            if(primary.get('ESO ACQ FIBER FT1X') == None):
+                print "Blah!"
+            print "Haa"
+    else:
+        print "Hoo"
+#"""
 
 SC_table = numpy.array(SC_table)
 Acq_SC_table = numpy.array(Acq_SC_table)
@@ -104,17 +138,23 @@ ans_FT = x_FT.dot(FT_table)
 ans_SC = x_SC.dot(SC_table)
 
 if source == 'Fringe Tracker':
-    ax0.matshow(Acq_FT_table)
+    aqft = ax0.matshow(Acq_FT_table)
+    fig0.colorbar(aqft)
     cov = ax1.matshow(ans_FT)
     fig1.colorbar(cov)
-    ax2.matshow(FT_table)
-    ax3.matshow(Acq_FT_table.dot(ans_FT))
+    ft = ax2.matshow(FT_table)
+    fig2.colorbar(cov)
+    fitft = ax3.matshow(Acq_FT_table.dot(ans_FT))
+    fig3.colorbar(fitft)
 elif source == 'Science Camera':
-    ax0.matshow(Acq_SC_table)
+    aqsc = ax0.matshow(Acq_SC_table)
+    fig0.colorbar(aqsc)
     cov = ax1.matshow(ans_SC)
     fig1.colorbar(cov)
-    ax2.matshow(SC_table)
-    ax3.matshow(Acq_SC_table.dot(ans_SC))
+    sc = ax2.matshow(SC_table)
+    fig2.colorbar(sc)
+    fitsc = ax3.matshow(Acq_SC_table.dot(ans_SC))
+    fig3.colorbar(fitsc)
 
 ax0.set_title("AcqCamera %s - Max Pixel" % source)
 ax0.set_xlabel("TEL channel")
@@ -133,10 +173,10 @@ fig3.show()
 print "Science Camera: ", ans_SC.diagonal()
 print "Fringe Tracker: ", ans_FT.diagonal()
 
-fig0.savefig("AcqCam_%s_MaxPix.png" % source.replace(' ', '_'))
-fig1.savefig("%s_CovMat.png" % source.replace(' ', '_'))
-fig2.savefig("%s_Pipeline_Flux.png" % source.replace(' ', '_'))
-fig3.savefig("%s_fit.png" % source.replace(' ', '_'))
+#fig0.savefig("AcqCam_%s_MaxPix.png" % source.replace(' ', '_'))
+#fig1.savefig("%s_CovMat.png" % source.replace(' ', '_'))
+#fig2.savefig("%s_Pipeline_Flux.png" % source.replace(' ', '_'))
+#fig3.savefig("%s_fit.png" % source.replace(' ', '_'))
 
 
 
