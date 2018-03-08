@@ -46,8 +46,8 @@ def findCorrelations(GravObs=[], ax=None):
             #if hasattr(Grav.DualSciP2VM, "AcqCamDat"):
             derot = Grav.getDerotatorPositions()
             offset = Grav.getSobj_Offsets()
-            #if (Grav.AcqCamData != None and offset == (0.0, 0.0)) :
-            if (Grav.AcqCamData != None) :
+            #if (Grav.AcqCamData != None) :
+            if (Grav.AcqCamData != None and offset == (0.0, 0.0)) :
                 Acq = Grav.AcqCamData
                 strehlAccumulator = []
                 if Acq.CIAO_Data != None:
@@ -71,8 +71,8 @@ def findCorrelations(GravObs=[], ax=None):
                             #A.append([1.0, SR])
                             A.append([1.0, SR, 10.0**(-2.5*Acq.FTMag)])
                             A.append([1.0, SR, 10.0**(-2.5*Acq.SCMag)])
-                            A_FT.append([1.0, SR])
-                            A_SC.append([1.0, SR])
+                            A_FT.append([SR])
+                            A_SC.append([SR])
                             #A.append([1.0, SR, 10.0**(-2.5*Acq.FTMag)*Acq.AcqDit,
                             #    Acq.CIAO_Data[j]["Strehl"],
                             #    Acq.CIAO_Data[j]["Seeing"],
@@ -158,7 +158,7 @@ def findCorrelations(GravObs=[], ax=None):
         print fit_SC, A_SC.shape
         print ("On error = %.3f" % numpy.mean(numpy.array(on_error)))
         print ("Off error = %.3f" % numpy.mean(numpy.array(off_error)))
-        ax[0][i].scatter(A_FT[:,1], x_FT, c=colors[i])
+        ax[0][i].scatter(A_FT, x_FT, c=colors[i])
         #counts, yedges, xedges, image = ax[0][i].hist2d(A_FT[:,1], x_FT, bins=50,
         #        cmap=colormaps[i])
         #nbins = 20
@@ -171,7 +171,7 @@ def findCorrelations(GravObs=[], ax=None):
         #ax[0].contour(counts, extent=[xedges.min(), xedges.max(), yedges.min(),
         #    yedges.max()],cmap=colormaps[i], alpha=0.5,
         #    levels=[counts.max()/5.0])
-        ax[1][i].scatter(A_SC[:,1], x_SC, c=colors[i])
+        ax[1][i].scatter(A_SC, x_SC, c=colors[i])
         #counts, yedges, xedges, image = ax[1][i].hist2d(A_SC[:,1], x_SC, bins=50,
         #        cmap=colormaps[i])
         #junk = numpy.hstack((linex.T, numpy.ones([linex.shape[1],
@@ -180,13 +180,15 @@ def findCorrelations(GravObs=[], ax=None):
         strehl[i] = numpy.array(strehl[i])
         ellipsicity[i] = numpy.array(ellipsicity[i])
         for n in range(4):
-            ax[0][n].plot(linex[1,:], fit_FT.dot(linex), color = colors[i])
-            ax[1][n].plot(linex[1,:], fit_SC.dot(linex), color = colors[i])
+            #ax[0][n].plot(linex[1,:], fit_FT.dot(linex[1]), color = colors[i])
+            #ax[1][n].plot(linex[1,:], fit_SC.dot(linex), color = colors[i])
+            ax[0][n].plot(linex[1,:], fit_FT*linex[1], color = colors[i])
+            ax[1][n].plot(linex[1,:], fit_SC*linex[1], color = colors[i])
         #ax[2][i].hist(CIAO_SR[i], bins=numpy.linspace(0,1.0, num=10),
         #            color=colors[i])
         #ax[4].scatter(ellipsicity[i], x_FT, color=colors[i])
         ax[2][i].hist(numpy.array(strehl[i], dtype=float),
-                bins=numpy.linspace(0,0.10, 20),
+                bins=numpy.linspace(0,0.30, 20),
                     color=colors[i])
         #print("CIAO Strehl")
         #print("Mean = %.3f Stdev = %.3f Skew = %.3f" % (numpy.mean(CIAO_SR[i]),
@@ -209,7 +211,7 @@ def findCorrelations(GravObs=[], ax=None):
                 print("KS Test for AcqCam SR for Tel%d and Tel%d: %.3f" % (i+1, j+1,
                     scipy.stats.ks_2samp(strehl[i], strehl[j]).pvalue))
 
-    #ax[0].set_xlabel("H-band AcqCam Strehl")
+    #ax[0].set_xlabel("H-band AcqCam Strehls)
     #ax[0].set_ylabel("FT Flux")
     #ax[0].set_title("IRS16C, August")
     #ax[0].set_title("IRS16C, July")
@@ -240,6 +242,8 @@ def getCIAO_DataLogger(Grav, DataLoggers):
             DL = Graffity.DataLogger(CIAO_DataLoggers[i][closest,-3])
             DL.loadData()
             DL.getRefSlopeZernikes()
+            #DL.computeStrehl()
+            #print asdf
             retval[i-1]["Tau0"] = CIAO_DataLoggers[i][closest,0]
             retval[i-1]["Strehl"] = CIAO_DataLoggers[i][closest,1]
             retval[i-1]["Seeing"] = CIAO_DataLoggers[i][closest,2]
@@ -293,7 +297,7 @@ GDB = CIAO_DatabaseTools.GRAVITY_Database()
 CDB = CIAO_DatabaseTools.CIAO_Database()
 CIAO_DataLoggers = CDB.query(keywords = ["TAU0", "STREHL", "SEEING", "WINDSP"])
 
-startTime = '2017-01-14 00:00:00'
+startTime = '2017-07-14 00:00:00'
 stopTime = '2018-08-21 00:00:00'
 
 GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG',
@@ -302,8 +306,8 @@ GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG',
         endTime=stopTime)
 
 GravData = []
-ftobj = "WDS_J16003-2237AB"
-sobj = "WDS_J16003-2237AB"
+ftobj = "IRS16C"
+sobj = "S2"
 
 for Grav in GravityVals:
     CIAO_Data = getCIAO_DataLogger(Grav, CIAO_DataLoggers)
@@ -312,7 +316,7 @@ for Grav in GravityVals:
     #if ((Grav[0] == 'WDS_J16003-2237AB')):
     #if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
     #if ((Grav[4] == 'CIAO') and (Grav[0] == 'WDS_J15348+1032A')): 
-    if ((Grav[4] == 'CIAO') and (Grav[1]=='S2') and (Grav[0] == 'IRS16C')):
+    if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
         GravData.append(Graffity.GRAVITY_Data(fileBase=Grav[-1],
             CIAO_Data=CIAO_Data, processAcqCamData=False))
         print asdf
@@ -326,8 +330,8 @@ covar = findCorrelations(GravData, ax=[[ax11, ax12, ax13, ax14], [ax21, ax22,
 #Acq.plot(axes=axes)
 #Acq.findCorrelations(ax1)
 
-ax11.set_xbound(0.0, 0.1)
-ax11.set_ybound(0.0, 3e6)
+ax11.set_xbound(0.0, 0.3)
+ax11.set_ybound(0.0, 2e6)
 #ax11.set_xbound(0.0, 2.0)
 #ax11.set_ybound(ax11.dataLim.get_points()[0][1], ax11.dataLim.get_points()[1][1])
 ax11.set_xlabel("Strehl Ratio")
@@ -336,8 +340,8 @@ pyplot.setp(ax12.get_xticklabels(), visible=False)
 pyplot.setp(ax14.get_xticklabels(), visible=False)
 pyplot.setp(ax13.get_yticklabels(), visible=False)
 pyplot.setp(ax14.get_yticklabels(), visible=False)
-ax21.set_xbound(0.0, 0.1)
-ax21.set_ybound(0.0, 3e6)
+ax21.set_xbound(0.0, 0.3)
+ax21.set_ybound(0.0, 1e6)
 #ax21.set_xbound(0.0, 2.0)
 #ax21.set_ybound(ax21.dataLim.get_points()[0][1], ax21.dataLim.get_points()[1][1])
 ax21.set_xlabel("Strehl Ratio")

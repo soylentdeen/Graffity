@@ -304,6 +304,12 @@ GravityVals = GDB.query(keywords = ['FTOBJ_NAME', 'SOBJ_NAME', 'FTMAG',
 GravData = []
 ftobj = "WDS_J16003-2237AB"
 sobj = "WDS_J16003-2237AB"
+platescales = {}
+platescales[0] = []
+platescales[1] = []
+platescales[2] = []
+platescales[3] = []
+
 
 for Grav in GravityVals:
     CIAO_Data = getCIAO_DataLogger(Grav, CIAO_DataLoggers)
@@ -312,12 +318,28 @@ for Grav in GravityVals:
     #if ((Grav[0] == 'WDS_J16003-2237AB')):
     #if ((Grav[4] == 'CIAO') and (Grav[1]=='S2') and (Grav[0] == 'IRS16C')):
     #if ((Grav[4] == 'CIAO') and (Grav[0] == 'WDS_J15348+1032A')): 
-    if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
+    #if ((Grav[0] == ftobj) and (Grav[1] == sobj)): 
+    if True:
         GravData.append(Graffity.GRAVITY_Data(fileBase=Grav[-1],
             CIAO_Data=CIAO_Data, processAcqCamData=False))
-        print Grav[-1]
+        if (GravData[-1].getArrayConfig() == 'U'):
+            PS = GravData[-1].getPlateScales()
+            if PS[1] != 0:
+                platescales[0].append(PS[0])
+                platescales[1].append(PS[1])
+                platescales[2].append(PS[2])
+                platescales[3].append(PS[3])
+                print ("UT : %s, plate scales = %.3f, %.3f, %.3f, %.3f" % 
+                   (Grav[-1], PS[0], PS[1], PS[2], PS[3]))
 
         
+print "Average Plate Scales:"
+print ("%.3f, %.3f, %.3f, %.3f" % (numpy.mean(numpy.array(platescales[0])),
+    numpy.mean(numpy.array(platescales[1])),
+    numpy.mean(numpy.array(platescales[2])),
+    numpy.mean(numpy.array(platescales[3]))))
+print asdf
+
 covar = findCorrelations(GravData, ax=[[ax11, ax12, ax13, ax14], [ax21, ax22,
     ax23, ax24], [ax31, ax32, ax33, ax34], ax4, ax5])
 
