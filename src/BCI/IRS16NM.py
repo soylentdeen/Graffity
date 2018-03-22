@@ -18,12 +18,6 @@ def fitGaussian(x, y):
 
 figs, axes = PlotTools.configurePlots(4)
 
-filebases = ['/gvstore1/forFrank/2017-07-09/reduced_20180307/','/gvstore1/forFrank/2017-08-09/reduced_20180307/', 
-             '/gvstore1/forFrank/2017-08-08/reduced_20180307/','/gvstore1/forFrank/2017-08-07/reduced_20180307/',
-             '/gvstore1/forFrank/2017-08-06/reduced_20180307/','/gvstore1/forFrank/2017-08-05/reduced_20180307/',
-             '/gvstore1/forFrank/2017-07-07/reduced_20180307/','/gvstore1/forFrank/2017-07-08/reduced_20180307/',
-             '/gvstore1/forFrank/2017-08-04/reduced_20180307/','/gvstore1/forFrank/2017-08-03/reduced_20180307/']
-
 observationFiles = numpy.array([])
 startdir = '/gvstore1/forFrank/'
 
@@ -56,27 +50,19 @@ for f in observationFiles:
         Grav = Graffity.GRAVITY_Dual_Sci_P2VM(fileBase=f[:-20], processAcqCamData=True)
         print "Good - %s" %f
         for i in Grav.AcqCamDat.newStrehl.data.keys():
-            angle = numpy.deg2rad(Grav.NORTH_ANGLE[i])
-            xy = numpy.array([Grav.AcqCamDat.newSC_FIBER_DX.data[i], Grav.AcqCamDat.newSC_FIBER_DY.data[i]])*Grav.AcqCamDat.newSCALE.data[i]
-            rotmat = numpy.array([[numpy.cos(angle), -numpy.sin(angle)],[numpy.sin(angle), numpy.cos(angle)]])
-            radec = rotmat.dot(xy)
-            goodPoints = numpy.isfinite(radec)[0]
-            radec[0,goodPoints] -= numpy.mean(radec[0,goodPoints])
-            radec[1,goodPoints] -= numpy.mean(radec[1,goodPoints])
-            radec += numpy.array([[-Grav.MET_SOBJ_DRA[i]],[Grav.MET_SOBJ_DDEC[i]]])
-            FiberOffset = numpy.sum(radec**2.0, axis=0)**0.5
-            offsets[i] = numpy.append(offsets[i], FiberOffset[goodPoints])
-            strehls[i] = numpy.append(strehls[i], Grav.AcqCamDat.newStrehl.data[i][goodPoints])
-            flux[i] = numpy.append(flux[i], Grav.AcqCamDat.TOTALFLUX_SC.data[i][goodPoints])
-            axes[2].scatter(FiberOffset[goodPoints],Grav.AcqCamDat.TOTALFLUX_SC.data[i][goodPoints],
-                    color=color[i], s=2*2**(10*Grav.AcqCamDat.newStrehl.data[i][goodPoints]))
-            axes[3].scatter(Grav.AcqCamDat.newStrehl.data[i], Grav.AcqCamDat.TOTALFLUX_SC.data[i], color=color[i])
+            FiberOffset = (Grav.MET_SOBJ_DRA[i]**2.0 + Grav.MET_SOBJ_DDEC[i]**2.0)**0.5
+            offsets[i] = numpy.append(offsets[i], FiberOffset)
+            strehls[i] = numpy.append(strehls[i], Grav.Strehl[i])
+            flux[i] = numpy.append(flux[i], numpy.mean(Grav.AcqCamDat.TOTALFLUX_SC.data[i]))
+            axes[2].scatter([FiberOffset],[flux[i][-1]],
+                    color=color[i], s=2*2**(10*strehls[i][-1]))
+            axes[3].scatter([strehls[i][-1]], [flux[i][-1]], color=color[i])
 
         del(Grav)
     else:
         print "Bad"
 
-binSize=0.1
+binSize=0.2
 StrehlBins = numpy.arange(0.05, 0.65, binSize)
 offsetRange = numpy.linspace(0.0, 50.0)
 

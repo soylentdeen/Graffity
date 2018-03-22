@@ -759,6 +759,11 @@ class GRAVITY_Dual_Sci_P2VM( GRAVITY_Dual_P2VM ):
         self.NORTH_ANGLE[1] = header.get('ESO QC ACQ FIELD2 NORTH_ANGLE')
         self.NORTH_ANGLE[2] = header.get('ESO QC ACQ FIELD3 NORTH_ANGLE')
         self.NORTH_ANGLE[3] = header.get('ESO QC ACQ FIELD4 NORTH_ANGLE')
+        self.Strehl = {}
+        self.Strehl[0] = header.get('ESO QC ACQ FIELD1 STREHL')
+        self.Strehl[1] = header.get('ESO QC ACQ FIELD2 STREHL')
+        self.Strehl[2] = header.get('ESO QC ACQ FIELD3 STREHL')
+        self.Strehl[3] = header.get('ESO QC ACQ FIELD4 STREHL')
         self.SObjSwap = 'YES' in header.get('ESO INS SOBJ SWAP')
         self.FTName = header.get('ESO FT ROBJ NAME')
         self.FTMag = header.get('ESO FT ROBJ MAG')
